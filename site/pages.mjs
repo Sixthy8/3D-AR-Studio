@@ -21,7 +21,9 @@ export function homePage() {
 		title="Live demo" share-base="https://nirholas.github.io/3D-AR-Studio/studio.html"></ar-studio></div>
 	<p style="font-size:13px;color:var(--faint);margin-top:12px">
 		That frame is the real package, running the same code you install. On a phone, tap
-		<strong>Camera</strong> and the models stand on your actual floor.
+		<strong>Place in your space</strong> and the model is anchored to your actual floor by
+		ARKit or ARCore. <strong>Camera</strong> is the in-page preview beside it: it turns with
+		the phone, it does not track the room.
 	</p>
 </section>
 
@@ -62,7 +64,7 @@ npx 3d-ar-studio deploy                 # push it and turn on GitHub Pages</code
 			<p>An always-armed hit-test reticle, one XRAnchor per model, real-world light estimation, and depth occlusion so models hide behind your furniture.</p></div>
 		<div class="card"><span class="ico" aria-hidden="true">📱</span>
 			<h3>Real ARKit on iPhone, not an approximation</h3>
-			<p>Tap <strong>Place in your space</strong> and Apple's own "View in AR" sheet opens: true plane detection, true scale, true occlusion. The model is converted to USDZ on the device and prepared before the tap, because iOS opens Quick Look only while the gesture is still live. Android without WebXR gets Scene Viewer.</p></div>
+			<p>Tap <strong>Place in your space</strong> and Apple's own "View in AR" sheet opens: true plane detection, true scale, true occlusion. The model is converted to USDZ on the device, stood on the floor rather than left at the height it was modelled at, and prepared before the tap, because iOS opens Quick Look only while the gesture is still live. Android without WebXR gets Scene Viewer.</p></div>
 		<div class="card"><span class="ico" aria-hidden="true">🔗</span>
 			<h3>Scenes are links</h3>
 			<p>The whole arrangement (models, positions, rotations, scales) round-trips through the URL. Compose on a laptop, scan the QR, it reopens exactly on your phone.</p></div>

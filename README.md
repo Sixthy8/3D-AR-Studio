@@ -35,7 +35,8 @@ ends the session. This one keeps the whole scene in your page:
   occlusion, the system's own "View in AR" sheet. The model is converted to USDZ on the device
   (a real conversion via three.js's `USDZExporter`, no server involved) and, because it is
   exported from the copy already standing in your scene, it arrives at the size you pinched it
-  to and in the pose it was in. Android without WebXR gets Scene Viewer. Desktop gets a grid
+  to and in the pose it was in, stood on the floor rather than hanging at the height it happened
+  to be modelled at. Android without WebXR gets Scene Viewer. Desktop gets a grid
   preview and a QR hand-off to a phone.
 - **Scenes are links.** Models, positions, rotations and scales round-trip through the URL.
   Compose on a laptop, scan the QR, it reopens exactly on your phone.
@@ -400,16 +401,56 @@ download, no second CORS round trip, and the person gets the pose and the size t
 looking at. `objectToUsdzBlob(object3D)` is exported if you want that for your own three.js
 scene.
 
+### Why a model hangs in the air instead of resting on your floor
+
+The third trap, and the one that survives both of the others:
+
+> **AR Quick Look anchors the scene's ORIGIN to the plane it detects, and never looks at the
+> geometry.** A GLB authored around its bounding-box centre arrives half-buried; one authored
+> around a distant scene origin arrives floating across the room at whatever height it was
+> modelled at. Both read as broken tracking, and no anchoring property fixes either: the
+> content has to be moved.
+
+Every export from this package is therefore stood on `y = 0` with its footprint centred over
+the origin before it is written. `groundOnFloor()` is exported if you want to do that to your
+own scene.
+
+Two smaller ones ride along with it:
+
+> **`USDZExporter` walks `scene.children` and writes each node's LOCAL matrix**, so the
+> transform on the object you hand it is never written at all. Set a scale on the root and the
+> file comes out at the original size with no warning. `usdzExportRoot()` wraps content in an
+> identity root plus a `Model` stage node, and every placement this package applies rides on
+> the stage, which does get written.
+
+> **USDZ is metres** (`metersPerUnit = 1`). A 75 cm prop authored in centimetres arrives 75 m
+> tall, too large for any plane ARKit found indoors, and swims around the viewer. Pass
+> `{ fit: true }` to `sceneToUsdzBlob()` (`glbUrlToUsdzBlob()` already does) to normalize a
+> model straight off the network. Anything already within 2x of a believable real-world size
+> is left exactly as authored.
+
+### The camera is one client at a time
+
+The studio releases its `getUserMedia` passthrough on the way into the device's AR viewer and
+restarts it when you come back. Leave the page's stream running and ARKit starts against a
+camera another process is already holding: the model appears, and then world tracking and
+plane detection never converge, so it drifts with the phone instead of settling. If you drive
+the hand-off yourself from your own camera UI, stop your tracks before you call `open()`.
+
+Passthrough itself is a gyroscope over a video feed: it turns with you, and that is all. It has
+no plane detection and no positional tracking, so it will never hold a model to a spot on a
+real floor. On iOS that is what Quick Look is for, and the studio's status line says so.
+
 ---
 
 ## Development
 
 ```bash
 npm install
-npm test                 # 55 unit tests, no browser needed
+npm test                 # 72 unit tests, no browser needed
 npm run build            # dist/ bundles
 npm run build:site       # docs/ (the GitHub Pages site)
-npm run test:browser     # 18 end-to-end checks in a real browser (needs Playwright)
+npm run test:browser     # 35 end-to-end checks in a real browser (needs Playwright)
 npm run inspect          # MCP Inspector against the local server
 ```
 

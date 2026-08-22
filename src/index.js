@@ -46,7 +46,7 @@ export {
 } from './studio/native-ar.js';
 export {
 	glbUrlToUsdzBlob, objectToUsdzBlob, sceneToUsdzBlob, bakeSkinnedMeshes,
-	coerceMaterialsToStandard, ensureNormals,
+	coerceMaterialsToStandard, ensureNormals, usdzExportRoot, groundOnFloor, fitToRoomScale,
 } from './studio/usdz.js';
 
 // Scene math and links: useful for building your own UI on top.

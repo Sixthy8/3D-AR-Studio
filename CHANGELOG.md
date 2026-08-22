@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.3.2
+
+- **A model placed through Quick Look now rests on your floor instead of hanging in the air.**
+  0.3.1 got an iPhone into ARKit; once there, the model hung at roughly the height it had been
+  authored at and drifted with the phone rather than settling on a surface, which reads as
+  broken tracking and is not. AR Quick Look anchors the scene's ORIGIN to the plane it detects
+  and never looks at the geometry, so a GLB authored around its bounding-box centre arrives
+  half-buried and one authored around a distant scene origin arrives floating across the room.
+  No anchoring flag fixes that; the content has to be moved. Every export is now stood on y=0
+  with its footprint centred over the origin before it is written. On the Poly Haven wrench in
+  the demo catalogue that is a 14 cm correction.
+- **The pinch size reaches the AR viewer.** `USDZExporter` walks `scene.children` and writes
+  each node's LOCAL matrix, so the transform on the object handed to it is never written at
+  all: the scale the studio set on the exported root was silently dropped, and every model
+  arrived at its authored size no matter what anyone had resized it to. Placement now rides on
+  a `Model` stage node inside the root, which does get written.
+- **A model authored in centimetres is brought back to room scale** on the convert-from-URL
+  path. USDZ is metres, so a 75 cm prop authored as 75 units arrived 75 m tall, far too large
+  for any plane ARKit found indoors, and swam around the viewer: the same symptom as a broken
+  anchor from a completely different cause.
+- **The page hands the camera over before the AR viewer opens.** The camera is a single-client
+  resource on a phone. Leaving the studio's `getUserMedia` stream running while Quick Look
+  started ARKit against the same camera left world tracking and plane detection unable to
+  converge. The passthrough is now released on the way into native AR and restarted when you
+  come back, exactly as the immersive WebXR path has always done.
+- **The camera passthrough says what it is.** It is a gyroscope over a video feed: it turns with
+  you, but it has no plane detection and no positional tracking, so walking around was never
+  going to hold a model to a spot on the real floor. On a device with a real AR viewer the
+  status line now says so and offers the one-tap route to it.
+- New API: `usdzExportRoot()`, `groundOnFloor()`, `fitToRoomScale()`, and a `fit` option on
+  `sceneToUsdzBlob()`.
+
 ## 0.3.1
 
 - **Quick Look now opens in AR, not Object mode.** 0.3.0 got an iPhone all the way into Apple's

@@ -22,10 +22,11 @@
 // Ported from the three.ws USDZ pipeline (Apache-2.0).
 
 import {
-	BufferAttribute, Color, DoubleSide, Mesh, MeshStandardMaterial, Vector3,
+	Box3, BufferAttribute, Color, DoubleSide, Group, Mesh, MeshStandardMaterial, Vector3,
 } from 'three';
 import { clone as cloneSkinnedScene } from 'three/addons/utils/SkeletonUtils.js';
 import { sharedGLTFLoaderReady } from './loaders.js';
+import { fitTransform } from './scene-math.js';
 
 /**
  * CPU-skin one SkinnedMesh at its current pose, returning deformed positions in
@@ -116,30 +117,142 @@ export function ensureNormals(scene) {
 }
 
 /**
+ * Wrap content in a fresh, identity-transform root and a `stage` node that
+ * carries the export's own placement.
+ *
+ * THIS WRAPPER IS NOT TIDINESS, IT IS A CORRECTNESS FIX. `USDZExporter` walks
+ * `scene.children` and writes each node's LOCAL matrix, so the transform on the
+ * object you hand it is never written at all. Set a scale on the root and the
+ * export silently comes out at the original size; set a position and it is
+ * silently dropped. Everything this module needs to place a model (the pinch
+ * scale, the floor offset, the recentre) therefore lives on `stage`, which is a
+ * child and so does get written.
+ *
+ * @param {import('three').Object3D} object
+ * @returns {{root: import('three').Group, stage: import('three').Group}}
+ */
+export function usdzExportRoot(object) {
+	const root = new Group();
+	root.name = 'Root';
+	const stage = new Group();
+	stage.name = 'Model';
+	stage.add(object);
+	root.add(stage);
+	root.updateMatrixWorld(true);
+	return { root, stage };
+}
+
+/** World-space bounds of a prepared export root, or null when it holds nothing. */
+function measure(root) {
+	root.updateMatrixWorld(true);
+	const box = new Box3().setFromObject(root);
+	if (box.isEmpty()) return null;
+	const min = box.min, max = box.max;
+	if (![min.x, min.y, min.z, max.x, max.y, max.z].every(Number.isFinite)) return null;
+	return box;
+}
+
+/**
+ * Stand the model on y=0 with its footprint centred on the origin.
+ *
+ * This is the single thing that decides whether AR Quick Look puts a model on
+ * someone's floor or leaves it hanging in mid-air. Quick Look anchors the
+ * scene's ORIGIN to the horizontal plane it detects and does not look at the
+ * geometry: a GLB authored with its origin at the bounding-box centre arrives
+ * half-buried, one authored around a distant scene origin arrives floating
+ * across the room at eye level, and in both cases the model reads as "not
+ * tracking" because it never touches the ground the person is pointing at.
+ * Neither is a Quick Look bug and no anchoring property fixes it; the content
+ * has to be moved.
+ *
+ * @param {import('three').Group} stage  The node from `usdzExportRoot`.
+ * @param {import('three').Group} root
+ * @returns {boolean} false when there was nothing to ground.
+ */
+export function groundOnFloor(stage, root) {
+	const box = measure(root);
+	if (!box) return false;
+	const centre = box.getCenter(new Vector3());
+	stage.position.x -= centre.x;
+	stage.position.y -= box.min.y;
+	stage.position.z -= centre.z;
+	root.updateMatrixWorld(true);
+	return true;
+}
+
+/**
+ * Give the model a believable real-world size.
+ *
+ * USDZ is metres (`metersPerUnit = 1`), and a model authored in centimetres
+ * arrives a hundred times too big. A ten-metre chair cannot sit on a plane
+ * ARKit found in a living room, so Quick Look shows it swimming around the
+ * viewer rather than resting anywhere: the same symptom as a broken anchor,
+ * from a completely different cause.
+ *
+ * Uses the studio's own normalization rule, so a model placed through the
+ * studio and the same model converted straight from its URL land at the same
+ * size. Models already within 2x of a believable size are left exactly as
+ * authored: real furniture scans stay real.
+ *
+ * @param {import('three').Group} stage
+ * @param {import('three').Group} root
+ * @returns {number} the scale applied (1 when the model was already sane).
+ */
+export function fitToRoomScale(stage, root) {
+	const box = measure(root);
+	if (!box) return 1;
+	let skinned = false;
+	root.traverse((o) => { if (o.isSkinnedMesh) skinned = true; });
+	const { scale } = fitTransform(
+		{ min: { x: box.min.x, y: box.min.y, z: box.min.z }, max: { x: box.max.x, y: box.max.y, z: box.max.z } },
+		{ skinned },
+	);
+	if (!(scale > 0) || scale === 1) return 1;
+	stage.scale.multiplyScalar(scale);
+	root.updateMatrixWorld(true);
+	return scale;
+}
+
+/**
  * Convert a loaded scene to USDZ bytes. Mutates the scene, so pass a clone or a
  * scene you are done with.
  *
+ * The model is always grounded before it is written: see `groundOnFloor` for
+ * why that, and not any anchoring flag, is what makes AR Quick Look put it on
+ * the floor.
+ *
  * @param {import('three').Object3D} scene
- * @param {object} [options] Passed through to three's USDZExporter.
+ * @param {object} [options]
+ * @param {boolean} [options.fit] Normalize an absurdly authored size to a
+ *   believable real-world one. On for a raw file straight off the network, off
+ *   for a model the studio has already normalized and the person has resized.
+ *   Everything else is passed through to three's USDZExporter.
  * @returns {Promise<Blob>} model/vnd.usdz+zip
  */
-export async function sceneToUsdzBlob(scene, options = {}) {
-	bakeSkinnedMeshes(scene);
-	coerceMaterialsToStandard(scene);
-	ensureNormals(scene);
+export async function sceneToUsdzBlob(scene, { fit = false, ...options } = {}) {
+	const { root, stage } = usdzExportRoot(scene);
+	bakeSkinnedMeshes(root);
+	coerceMaterialsToStandard(root);
+	ensureNormals(root);
+	// Size first, then stand it on the floor: grounding measures the model at the
+	// size it will actually be exported at.
+	if (fit) fitToRoomScale(stage, root);
+	groundOnFloor(stage, root);
 	// Loaded on demand: nobody who never taps "Place in your space" should pay
 	// for the exporter.
 	const { USDZExporter } = await import('three/addons/exporters/USDZExporter.js');
-	const bytes = await new USDZExporter().parseAsync(scene, {
+	const bytes = await new USDZExporter().parseAsync(root, {
 		// Quick Look is the only thing that ever reads these bytes, and it applies
 		// texture repeat and offset in a different order to every other USD
 		// renderer (Apple FB10036297). This flag pre-compensates, so a model with
 		// tiled textures does not arrive in someone's room with the tiling
 		// visibly wrong. It is a no-op on the untiled default.
 		quickLookCompatible: true,
-		// The default plane anchoring: the model rests on the horizontal surface
-		// the person points at, which is what "place it on your floor" means.
+		// Rest the model on the horizontal surface the person points at, which is
+		// what "place it on your floor" means. Stated rather than left to the
+		// exporter's default so a future default cannot quietly change it.
 		includeAnchoringProperties: true,
+		ar: { anchoring: { type: 'plane' }, planeAnchoring: { alignment: 'horizontal' } },
 		...options,
 	});
 	return new Blob([bytes], { type: 'model/vnd.usdz+zip' });
@@ -160,7 +273,10 @@ export async function sceneToUsdzBlob(scene, options = {}) {
  * Position and yaw are zeroed because the AR viewer re-anchors the model to the
  * surface the user picks; carrying the studio's floor coordinates through would
  * only offset it from their own reticle. World scale is preserved: it is the
- * real-world size.
+ * real-world size, and `sceneToUsdzBlob` is what makes it survive the export.
+ *
+ * No `fit`: this model went through the studio's own normalization when it was
+ * placed, and the size on top of that is the one the person pinched.
  *
  * @param {import('three').Object3D} object
  * @returns {Promise<Blob>} model/vnd.usdz+zip
@@ -201,5 +317,7 @@ export async function glbUrlToUsdzBlob(glbUrl, { signal, onProgress } = {}) {
 	if (!scene) throw new Error('that model contains no scene');
 
 	onProgress?.('convert');
-	return sceneToUsdzBlob(scene);
+	// Straight off the network and never seen by the studio's normalizer, so this
+	// is the one path that has to defend against a model authored in centimetres.
+	return sceneToUsdzBlob(scene, { fit: true });
 }

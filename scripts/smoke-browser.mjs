@@ -117,11 +117,23 @@ try {
 			// this check to one version of the exporter.
 			hasUsd: /\.usd[ac]\b/.test(text),
 			entries: (text.match(/\.(usd[ac]|png|jpg)/g) || []).slice(0, 4).join(' '),
+			// Entries are stored uncompressed (Quick Look requires it), so the USD
+			// scene description is readable straight out of the archive.
+			anchored: /preliminary:anchoring:type = "plane"/.test(text)
+				&& /preliminary:planeAnchoring:alignment = "horizontal"/.test(text),
+			metres: /metersPerUnit = 1/.test(text) && /upAxis = "Y"/.test(text),
+			staged: /def Xform "Model"/.test(text),
 			ms: Math.round(performance.now() - t0),
 		};
 	});
 	step('a GLB converts to real USDZ bytes on the device', usdz.zip && usdz.hasUsd && usdz.bytes > 10000,
 		`${(usdz.bytes / 1024).toFixed(0)} kB, ${usdz.type}, ${usdz.ms} ms, contains ${usdz.entries}`);
+	// Without these three the model opens in Quick Look and then hangs in the air
+	// instead of resting on the floor, which reads as broken tracking.
+	step('the USDZ asks ARKit for horizontal plane anchoring', usdz.anchored === true);
+	step('the USDZ declares metres and Y-up, the units Quick Look places by', usdz.metres === true);
+	step('the model rides on a stage node, so its placement survives the exporter',
+		usdz.staged === true);
 
 	const caps = await page.evaluate(async () => {
 		const mod = await import('./ar-studio.min.js');
@@ -211,6 +223,21 @@ try {
 				dl === 'wrench.usdz', String(dl));
 			const closed = await p2.evaluate(() => document.querySelector('.ars-modal[aria-label="Place a model in your space"]').hidden);
 			step('the sheet closes once the AR viewer has been handed the model', closed === true);
+			// The camera is one client at a time on a phone. Hold the page's stream
+			// open and ARKit never gets clean plane detection, so the model drifts
+			// with the device instead of anchoring. Headless Chromium has no camera,
+			// so the passthrough state is staged directly.
+			const yielded = await p2.evaluate(async () => {
+				const studio = document.querySelector('ar-studio').studio;
+				let stopped = false;
+				studio.arActive = true;
+				studio.mediaStream = { getTracks: () => [{ stop() { stopped = true; } }], getVideoTracks: () => [] };
+				studio._cameraYielded = false;
+				await studio.placeInYourSpace();
+				return { stopped, active: studio.arActive, yielded: studio._cameraYielded };
+			});
+			step('the page releases the camera before the AR viewer opens',
+				yielded.stopped === true && yielded.active === false && yielded.yielded === true);
 			// Second tap: the conversion is cached, so the sheet must arm without
 			// ever disabling the button. A stall here is the dead-button bug.
 			const t0 = Date.now();

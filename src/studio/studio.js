@@ -196,6 +196,9 @@ export class ArStudio {
 		this.estimatedLight = null;
 		/** 'webxr' | 'quicklook' | 'sceneviewer' | 'none', resolved at boot. */
 		this.arMode = 'none';
+		/** True while the device's own AR viewer has the camera we released. */
+		this._cameraYielded = false;
+		this._onArReturn = null;
 		this._nativeArBusy = false;
 		/** The hand-off the AR sheet's button will fire, once it is prepared. */
 		this._arHandoff = null;
@@ -889,7 +892,19 @@ export class ArStudio {
 			this._applyCameraFov();
 			this._startLightMatching();
 			await this._startGyro();
-			this._setStatus('Camera on: your models are in the room. Look around.');
+			// Be honest about what this view is. Passthrough is a phone's gyroscope
+			// over a camera feed: it turns with you, but it has no plane detection
+			// and no positional tracking, so walking around does not hold a model
+			// to a spot on the real floor. Reading that as broken tracking is
+			// exactly the wrong conclusion to leave someone with when the device
+			// has a real AR viewer one tap away.
+			if (this.arMode === 'quicklook' || this.arMode === 'sceneviewer') {
+				this._setStatus('Camera on. This preview turns with your phone; to lock a model to your real floor, place it in AR.', {
+					actionLabel: 'Place in AR', onAction: () => this._openArSheet(),
+				});
+			} else {
+				this._setStatus('Camera on: your models are in the room. Look around.');
+			}
 			this._emit('camera', { active: true });
 		} finally {
 			this.arTransitioning = false;
@@ -919,6 +934,51 @@ export class ArStudio {
 		this.arTrackH = 0;
 		if (was) this._emit('camera', { active: false });
 		this._framePreview();
+	}
+
+	/**
+	 * Hand the rear camera to the device's own AR viewer, and take it back after.
+	 *
+	 * The camera is a single-client resource on a phone. Leave the page's
+	 * `getUserMedia` stream running and Quick Look starts ARKit against a camera
+	 * another process is already holding: the model appears, and then world
+	 * tracking and plane detection never converge, so it drifts with the phone
+	 * instead of settling on the floor. It looks exactly like a broken anchor and
+	 * it is not one. The immersive WebXR path has always released the camera for
+	 * the same reason; the native hand-off has to as well.
+	 *
+	 * Synchronous on purpose: it runs in the same tick as the tap that opens the
+	 * viewer, and an `await` in front of it costs the user gesture Safari needs.
+	 */
+	_yieldCameraToNativeAr() {
+		if (!this.arActive || this._cameraYielded) return;
+		this._cameraYielded = true;
+		this._stopCamera();
+		// Quick Look presents over the page rather than navigating away, so the
+		// return is a visibility change, not a load. `focus` is the backstop for
+		// the iOS versions that never mark the page hidden underneath it.
+		this._onArReturn = () => {
+			if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+			this._reclaimCameraAfterNativeAr();
+		};
+		document.addEventListener('visibilitychange', this._onArReturn);
+		window.addEventListener('focus', this._onArReturn);
+	}
+
+	/** Restart the passthrough the person had running before AR took the camera. */
+	_reclaimCameraAfterNativeAr() {
+		if (!this._cameraYielded) return;
+		this._cameraYielded = false;
+		if (this._onArReturn) {
+			document.removeEventListener('visibilitychange', this._onArReturn);
+			window.removeEventListener('focus', this._onArReturn);
+			this._onArReturn = null;
+		}
+		if (this._destroyed || this.xrSession || this.arActive) return;
+		// Permission is already granted for this page, so this normally resolves
+		// without a prompt. When a browser insists on a fresh gesture, _startCamera
+		// puts a "Try again" action in the status line rather than failing silently.
+		this._startCamera().catch((err) => log.warn('camera did not come back after AR', err));
 	}
 
 	_screenAngle() {
@@ -1811,6 +1871,7 @@ export class ArStudio {
 		const handoff = this._arHandoff;
 		if (!handoff) return;
 		const { src, title } = this._arTarget;
+		this._yieldCameraToNativeAr();
 		try {
 			handoff.open();
 		} catch (err) {
@@ -1850,6 +1911,7 @@ export class ArStudio {
 			open: 'Opening AR…',
 		};
 		this._setStatus(STAGES.download, { sticky: true });
+		if (this.arMode === 'quicklook' || this.arMode === 'sceneviewer') this._yieldCameraToNativeAr();
 		try {
 			const opened = await placeInYourSpace(
 				{
@@ -2598,6 +2660,11 @@ export class ArStudio {
 		window.removeEventListener('deviceorientation', this._onOrientation, true);
 		window.removeEventListener('resize', this._onResize);
 		window.removeEventListener('pagehide', this._onPageHide);
+		if (this._onArReturn) {
+			document.removeEventListener('visibilitychange', this._onArReturn);
+			window.removeEventListener('focus', this._onArReturn);
+			this._onArReturn = null;
+		}
 		this._ro?.disconnect();
 		for (const p of [...this.placements]) this._removePlacement(p, { persist: false, broadcast: false });
 		this.shadowTex?.dispose();
