@@ -23,7 +23,8 @@ import { Box3, BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from 't
 import { unzipSync } from 'three/addons/libs/fflate.module.js';
 
 import {
-	fitToRoomScale, groundOnFloor, sceneToUsdzBlob, usdzExportRoot,
+	clampToPlaceableSize, fitToRoomScale, groundOnFloor, MAX_AR_FOOTPRINT_M,
+	MAX_AR_HEIGHT_M, sceneToUsdzBlob, usdzExportRoot,
 } from '../src/studio/usdz.js';
 
 /** A box of the given size, sitting with its own centre at `at`. */
@@ -133,4 +134,49 @@ test('fit only runs when it is asked for, so a pinched size is never undone', as
 		{ fit: true },
 	);
 	assert.ok(transformOf(refitted, 'Model').scaleX < 0.4, 'fit would have pulled the 2.25m prop back to 0.75m');
+});
+
+test('a model too big for any plane in a room is brought back to one that fits', () => {
+	// Quick Look does not place a model until ARKit finds a plane big enough to
+	// fit it. A 7m figure never gets one, so it hangs aligned to the camera and
+	// travels with the phone: the exact symptom people report as broken tracking.
+	const huge = new Group();
+	huge.scale.setScalar(4); // the studio's pinch ceiling, on a standing avatar
+	huge.add(boxAt([0.5, 1.7, 0.4], [0, 0.85, 0]));
+
+	const { root, stage } = usdzExportRoot(huge);
+	const applied = clampToPlaceableSize(stage, root);
+	assert.ok(applied < 1, 'it was brought down');
+	const size = boundsOf(root).getSize(new Vector3());
+	assert.ok(Math.max(size.x, size.z) <= MAX_AR_FOOTPRINT_M + 1e-6, 'footprint fits a floor plane');
+	assert.ok(size.y <= MAX_AR_HEIGHT_M + 1e-6, `still ${size.y.toFixed(2)}m tall`);
+});
+
+test('furniture-sized models pass the ceiling untouched', () => {
+	// A two-metre sofa is a thing AR Quick Look places every day.
+	const { root, stage } = usdzExportRoot(boxAt([2.1, 0.8, 0.9], [0, 0.4, 0]));
+	assert.equal(clampToPlaceableSize(stage, root), 1);
+	assert.deepEqual(stage.scale.toArray(), [1, 1, 1]);
+});
+
+test('a pinched model reaches AR at a size ARKit can place, still on the floor', async () => {
+	const pinched = new Group();
+	pinched.scale.setScalar(4);
+	pinched.add(boxAt([0.5, 1.7, 0.4], [0, 0.85, 0]));
+	const { root, stage } = usdzExportRoot(pinched);
+	clampToPlaceableSize(stage, root);
+	groundOnFloor(stage, root);
+	const box = boundsOf(root);
+	assert.ok(Math.abs(box.min.y) < 1e-6, `feet on y=0, got ${box.min.y}`);
+	const height = box.max.y - box.min.y;
+	assert.ok(height <= MAX_AR_HEIGHT_M + 1e-6, `${height.toFixed(2)}m tall`);
+	// The pinch is honoured up to the ceiling rather than thrown away: a model
+	// somebody deliberately made bigger still arrives bigger than its default.
+	assert.ok(height > 1.7, `expected taller than the unpinched 1.7m, got ${height.toFixed(2)}m`);
+
+	// And the same model, all the way through the exporter, still lands on y=0.
+	const another = new Group();
+	another.scale.setScalar(4);
+	another.add(boxAt([0.5, 1.7, 0.4], [0, 0.85, 0]));
+	assert.ok(Math.abs(transformOf(await usda(another), 'Model').y) < 1e-6);
 });

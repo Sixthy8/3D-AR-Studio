@@ -47,6 +47,7 @@ export {
 export {
 	glbUrlToUsdzBlob, objectToUsdzBlob, sceneToUsdzBlob, bakeSkinnedMeshes,
 	coerceMaterialsToStandard, ensureNormals, usdzExportRoot, groundOnFloor, fitToRoomScale,
+	clampToPlaceableSize, MAX_AR_FOOTPRINT_M, MAX_AR_HEIGHT_M,
 } from './studio/usdz.js';
 
 // Scene math and links: useful for building your own UI on top.

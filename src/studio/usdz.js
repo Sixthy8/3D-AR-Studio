@@ -214,6 +214,53 @@ export function fitToRoomScale(stage, root) {
 }
 
 /**
+ * Largest footprint (m) AR Quick Look can be relied on to find a plane for.
+ *
+ * Quick Look does not place a model until ARKit has found a horizontal plane
+ * BIG ENOUGH TO FIT IT. Until then the model hangs aligned to the camera and
+ * travels with the phone, which every person reads as broken tracking rather
+ * than as "still looking". Past roughly this size there is no such plane in an
+ * ordinary room, so the model never lands at all.
+ */
+export const MAX_AR_FOOTPRINT_M = 2.5;
+
+/** Tallest (m) a model can be and still belong in a room with a ceiling. */
+export const MAX_AR_HEIGHT_M = 2.5;
+
+/**
+ * Keep the export inside a size ARKit can actually place.
+ *
+ * A ceiling, not a normalizer: real furniture, a person, a car-door-sized prop
+ * all pass through untouched. It exists because the size someone pinched a
+ * model to is now honoured (it used to be silently dropped), and the studio
+ * lets that reach 4x. Four times a standing avatar is a seven-metre figure that
+ * no living-room floor plane will ever fit.
+ *
+ * @param {import('three').Group} stage
+ * @param {import('three').Group} root
+ * @param {{maxFootprint?: number, maxHeight?: number}} [limits]
+ * @returns {number} the scale applied (1 when it already fit).
+ */
+export function clampToPlaceableSize(stage, root, {
+	maxFootprint = MAX_AR_FOOTPRINT_M, maxHeight = MAX_AR_HEIGHT_M,
+} = {}) {
+	const box = measure(root);
+	if (!box) return 1;
+	const size = box.getSize(new Vector3());
+	const footprint = Math.max(size.x, size.z);
+	// The floor plane has to fit the footprint; the room has to fit the height.
+	// Whichever is tighter decides.
+	const scale = Math.min(
+		footprint > 0 ? maxFootprint / footprint : 1,
+		size.y > 0 ? maxHeight / size.y : 1,
+	);
+	if (!(scale < 1) || !Number.isFinite(scale)) return 1;
+	stage.scale.multiplyScalar(scale);
+	root.updateMatrixWorld(true);
+	return scale;
+}
+
+/**
  * Convert a loaded scene to USDZ bytes. Mutates the scene, so pass a clone or a
  * scene you are done with.
  *
@@ -235,8 +282,10 @@ export async function sceneToUsdzBlob(scene, { fit = false, ...options } = {}) {
 	coerceMaterialsToStandard(root);
 	ensureNormals(root);
 	// Size first, then stand it on the floor: grounding measures the model at the
-	// size it will actually be exported at.
+	// size it will actually be exported at, and a model too big for any plane in
+	// the room never gets placed on one at all.
 	if (fit) fitToRoomScale(stage, root);
+	clampToPlaceableSize(stage, root);
 	groundOnFloor(stage, root);
 	// Loaded on demand: nobody who never taps "Place in your space" should pay
 	// for the exporter.

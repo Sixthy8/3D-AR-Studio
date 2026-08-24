@@ -196,8 +196,9 @@ export class ArStudio {
 		this.estimatedLight = null;
 		/** 'webxr' | 'quicklook' | 'sceneviewer' | 'none', resolved at boot. */
 		this.arMode = 'none';
-		/** True while the device's own AR viewer has the camera we released. */
+		/** True while the device's own AR viewer has the stage we stood down for. */
 		this._cameraYielded = false;
+		this._cameraWasOn = false;
 		this._onArReturn = null;
 		this._nativeArBusy = false;
 		/** The hand-off the AR sheet's button will fire, once it is prepared. */
@@ -951,9 +952,15 @@ export class ArStudio {
 	 * viewer, and an `await` in front of it costs the user gesture Safari needs.
 	 */
 	_yieldCameraToNativeAr() {
-		if (!this.arActive || this._cameraYielded) return;
+		if (this._cameraYielded) return;
 		this._cameraYielded = true;
+		this._cameraWasOn = this.arActive;
 		this._stopCamera();
+		// Nothing on this page is visible under the AR viewer, and a WebGL loop
+		// still running at 60fps behind it is competing with ARKit for the same
+		// GPU and the same thermal budget on a device that is about to do plane
+		// detection. Stop drawing until the person comes back.
+		this._stopLoop();
 		// Quick Look presents over the page rather than navigating away, so the
 		// return is a visibility change, not a load. `focus` is the backstop for
 		// the iOS versions that never mark the page hidden underneath it.
@@ -974,7 +981,10 @@ export class ArStudio {
 			window.removeEventListener('focus', this._onArReturn);
 			this._onArReturn = null;
 		}
-		if (this._destroyed || this.xrSession || this.arActive) return;
+		if (this._destroyed || this.xrSession) return;
+		this._startLoop();
+		if (this.arActive || !this._cameraWasOn) return;
+		this._cameraWasOn = false;
 		// Permission is already granted for this page, so this normally resolves
 		// without a prompt. When a browser insists on a fresh gesture, _startCamera
 		// puts a "Try again" action in the status line rather than failing silently.

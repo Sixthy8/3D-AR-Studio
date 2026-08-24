@@ -29,8 +29,17 @@
   you, but it has no plane detection and no positional tracking, so walking around was never
   going to hold a model to a spot on the real floor. On a device with a real AR viewer the
   status line now says so and offers the one-tap route to it.
-- New API: `usdzExportRoot()`, `groundOnFloor()`, `fitToRoomScale()`, and a `fit` option on
-  `sceneToUsdzBlob()`.
+- **A model too big for any plane in the room is brought back to one that fits.** Quick Look
+  does not place a model until ARKit has found a horizontal plane large enough to hold it;
+  until then the model hangs aligned to the camera and travels with the phone, which reads as
+  broken tracking rather than as "still looking". Exports are now capped at a 2.5 m footprint
+  and a 2.5 m height. This is a ceiling, not a normalizer: furniture, people and props pass
+  through untouched. It matters because the pinch size is honoured again, and the studio lets
+  that reach 4x, which on a standing figure is seven metres of nothing a floor will ever fit.
+- The render loop stops while the native AR viewer has the screen, instead of drawing 60 frames
+  a second of a hidden page while ARKit is doing plane detection on the same GPU.
+- New API: `usdzExportRoot()`, `groundOnFloor()`, `fitToRoomScale()`, `clampToPlaceableSize()`,
+  `MAX_AR_FOOTPRINT_M`, `MAX_AR_HEIGHT_M`, and a `fit` option on `sceneToUsdzBlob()`.
 
 ## 0.3.1
 

@@ -429,6 +429,14 @@ Two smaller ones ride along with it:
 > model straight off the network. Anything already within 2x of a believable real-world size
 > is left exactly as authored.
 
+And the one that looks most like broken tracking of all:
+
+> **Quick Look does not place a model until ARKit has found a plane big enough to hold it.**
+> Until then it hangs aligned to the camera and travels with the phone. Past a certain size
+> there is no such plane in an ordinary room, so it never lands at all. Every export is capped
+> at `MAX_AR_FOOTPRINT_M` (2.5 m) and `MAX_AR_HEIGHT_M` (2.5 m) by `clampToPlaceableSize()`.
+> A ceiling, not a normalizer: furniture, people and props go through untouched.
+
 ### The camera is one client at a time
 
 The studio releases its `getUserMedia` passthrough on the way into the device's AR viewer and
@@ -447,7 +455,7 @@ real floor. On iOS that is what Quick Look is for, and the studio's status line 
 
 ```bash
 npm install
-npm test                 # 72 unit tests, no browser needed
+npm test                 # 75 unit tests, no browser needed
 npm run build            # dist/ bundles
 npm run build:site       # docs/ (the GitHub Pages site)
 npm run test:browser     # 35 end-to-end checks in a real browser (needs Playwright)
