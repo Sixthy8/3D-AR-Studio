@@ -1501,12 +1501,8 @@ export class ArStudio {
 
 		for (const p of items) {
 			snapshots.set(p.id, {
-				offsetX: p.group.position.x - center.x,
-				offsetY: p.group.position.y - center.y,
-				offsetZ: p.group.position.z - center.z,
-				rotX: p.rotX,
-				yaw: p.yaw,
-				rotZ: p.rotZ,
+				offset: p.group.position.clone().sub(pivot.position),
+				quaternion: p.group.quaternion.clone(),
 				scale: this._logicalScale(p),
 			});
 		}
@@ -1599,12 +1595,8 @@ export class ArStudio {
 
 		for (const p of items) {
 			snapshots.set(p.id, {
-				offsetX: p.group.position.x - center.x,
-				offsetY: p.group.position.y - center.y,
-				offsetZ: p.group.position.z - center.z,
-				rotX: p.rotX,
-				yaw: p.yaw,
-				rotZ: p.rotZ,
+				offset: p.group.position.clone().sub(pivot.position),
+				quaternion: p.group.quaternion.clone(),
 				scale: this._logicalScale(p),
 			});
 		}
@@ -1681,10 +1673,6 @@ export class ArStudio {
 
 		const pivot = g.pivot;
 
-		// Groups obey the same yaw-only rotation rule as placements.
-		pivot.rotation.x = 0;
-		pivot.rotation.z = 0;
-
 		let factor = pivot.scale.x;
 
 		if (this._transformMode === 'scale') {
@@ -1711,33 +1699,33 @@ export class ArStudio {
 			factor = pivot.scale.x;
 		}
 
-		const angle = pivot.rotation.y;
-		const cos = Math.cos(angle);
-		const sin = Math.sin(angle);
-
 		for (const id of g.memberIds) {
 			const p = this.placements.find((item) => item.id === id);
 			const snap = g.snapshots.get(id);
 
 			if (!p || !snap || !this._isMine(p)) continue;
 
-			const sx = snap.offsetX * factor;
-			const sy = snap.offsetY * factor;
-			const sz = snap.offsetZ * factor;
+			// Rotate the member's original 3D offset around the pivot. Scaling the
+			// offset first preserves the existing uniform group-scale behaviour.
+			const offset = snap.offset
+				.clone()
+				.multiplyScalar(factor)
+				.applyQuaternion(pivot.quaternion);
 
-			const rx = sx * cos + sz * sin;
-			const rz = -sx * sin + sz * cos;
+			p.group.position.copy(pivot.position).add(offset);
 
-			p.group.position.set(
-				pivot.position.x + rx,
-				pivot.position.y + sy,
-				pivot.position.z + rz,
-			);
+			// Preserve the member's complete original orientation, then apply the
+			// pivot's full pitch/yaw/roll ahead of it.
+			p.group.quaternion
+				.copy(pivot.quaternion)
+				.multiply(snap.quaternion)
+				.normalize();
 
-			p.rotX = snap.rotX || 0;
-			p.yaw = snap.yaw + angle;
-			p.rotZ = snap.rotZ || 0;
-			p.group.rotation.set(p.rotX, p.yaw, p.rotZ);
+			// Bake the resulting Three.js orientation back into the scene's existing
+			// backward-compatible Euler fields.
+			p.rotX = p.group.rotation.x;
+			p.yaw = p.group.rotation.y;
+			p.rotZ = p.group.rotation.z;
 
 			const childScale = snap.scale * factor;
 			p.group.scale.setScalar(childScale);
