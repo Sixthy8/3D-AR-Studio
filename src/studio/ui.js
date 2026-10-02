@@ -185,6 +185,10 @@ export function buildUI(host, cfg) {
 		el('span', { class: 'ars-ar-go-icon', 'aria-hidden': 'true', text: '⬡' }),
 		el('span', { class: 'ars-ar-go-label', text: 'Place in your space' }),
 	]);
+	const arScene = el('button', { type: 'button', class: 'ars-btn ars-ar-scene', hidden: true }, [
+		el('span', { class: 'ars-ar-scene-icon', 'aria-hidden': 'true', text: '◈' }),
+		el('span', { class: 'ars-ar-scene-label', text: 'Place entire scene' }),
+	]);
 	const arXr = el('button', { type: 'button', class: 'ars-btn ars-ar-xr', hidden: true }, [
 		el('span', { 'aria-hidden': 'true', text: '✦' }), 'Immersive AR: place the whole scene',
 	]);
@@ -199,7 +203,7 @@ export function buildUI(host, cfg) {
 			arPicker,
 			arHint,
 			arStatus,
-			arGo, arXr, arQr, arClose,
+			arGo, arScene, arXr, arQr, arClose,
 		]),
 	]);
 
@@ -253,7 +257,7 @@ export function buildUI(host, cfg) {
 		selbar, selName,
 		tray, trayTabs, trayBody, trayClose,
 		qrModal, qrBox, qrLink, qrClose,
-		arModal, arThumb, arName, arPicker, arHint, arStatus, arGo, arXr, arQr, arClose,
+		arModal, arThumb, arName, arPicker, arHint, arStatus, arGo, arScene, arXr, arQr, arClose,
 		roomModal, roomIdle, roomLive, roomCreate, roomJoinForm, roomJoinInput,
 		roomCode, roomPresence, roomQr, roomCopy, roomLeave, roomClose,
 	};

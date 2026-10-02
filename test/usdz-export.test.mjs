@@ -180,3 +180,38 @@ test('a pinched model reaches AR at a size ARKit can place, still on the floor',
 	another.add(boxAt([0.5, 1.7, 0.4], [0, 0.85, 0]));
 	assert.ok(Math.abs(transformOf(await usda(another), 'Model').y) < 1e-6);
 });
+
+test('whole-scene USDZ keeps duplicate model instances when placements have unique identities', async () => {
+	// Two placements may originate from the exact same GLB. They still have to
+	// remain separate USD nodes or Quick Look can collapse one of them.
+	const scene = new Group();
+	scene.name = 'ARScene';
+
+	for (let i = 0; i < 2; i++) {
+		const instance = new Group();
+		instance.name = `Placement_${i + 1}_test`;
+
+		// Deliberately represent the same underlying model twice.
+		const model = new Group();
+		model.name = `DuplicateModel_${i + 1}_test`;
+		model.position.set(i === 0 ? -0.75 : 0.75, 0, 0);
+		model.add(boxAt([0.5, 1, 0.5], [0, 0.5, 0]));
+
+		instance.add(model);
+		scene.add(instance);
+	}
+
+	const text = await usda(scene);
+
+	assert.match(text, /def Xform "Placement_1_test"/);
+	assert.match(text, /def Xform "Placement_2_test"/);
+	assert.match(text, /def Xform "DuplicateModel_1_test"/);
+	assert.match(text, /def Xform "DuplicateModel_2_test"/);
+
+	// Both copies must survive as distinct transforms in the USD hierarchy.
+	assert.notEqual(
+		transformOf(text, 'DuplicateModel_1_test').x,
+		transformOf(text, 'DuplicateModel_2_test').x,
+		'the duplicate placements keep their independent scene positions',
+	);
+});

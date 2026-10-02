@@ -334,9 +334,12 @@ export function studioStyles() {
 .ars-ar-status.is-error { color: #ffb4b4 !important; }
 .ars-ar-status.is-ready { color: var(--ars-accent-ink) !important; }
 .ars-ar-status .ars-spinner { width: 12px; height: 12px; border-width: 2px; }
-.ars-ar-go[aria-busy="true"] { cursor: progress; }
+.ars-ar-go[aria-busy="true"],
+.ars-ar-scene[aria-busy="true"] { cursor: progress; }
 .ars-ar-go { font-size: 15px; padding: 13px 18px; }
 .ars-ar-go-icon { font-size: 15px; }
+.ars-ar-scene { font-size: 14px; padding: 12px 18px; }
+.ars-ar-scene-icon { margin-right: 5px; }
 .ars-dialog-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .ars-divider { width: 100%; height: 1px; background: var(--ars-line); margin: 2px 0; }
 

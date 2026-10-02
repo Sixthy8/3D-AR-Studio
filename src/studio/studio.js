@@ -204,6 +204,9 @@ export class ArStudio {
 		/** The hand-off the AR sheet's button will fire, once it is prepared. */
 		this._arHandoff = null;
 		this._arTarget = null;
+		/** Prepared Quick Look hand-off for the whole composed scene. */
+		this._arSceneHandoff = null;
+		this._arSceneKey = '';
 		/** Bumped on every sheet open and target change so a slow, stale
 		 *  conversion can never enable the button for the wrong model. */
 		this._arToken = 0;
@@ -309,6 +312,7 @@ export class ArStudio {
 		bind(u.arClose, 'click', () => this._closeArSheet());
 		bind(u.arModal, 'click', (e) => { if (e.target === u.arModal) this._closeArSheet(); });
 		bind(u.arGo, 'click', () => this._onArGo());
+		bind(u.arScene, 'click', () => this._onArSceneGo());
 		bind(u.arXr, 'click', () => { this._closeArSheet(); this._toggleXR(); });
 		bind(u.arQr, 'click', () => { this._closeArSheet(); this._openQr(); });
 		bind(u.arPicker, 'click', (e) => {
@@ -1593,6 +1597,125 @@ export class ArStudio {
 		}
 	}
 
+
+	/**
+	 * Stable cache identity for the exact composed scene.
+	 *
+	 * serializeScene() already captures every transform that changes the exported
+	 * bytes, so moving, rotating, resizing, adding or removing a placement gets a
+	 * different Quick Look cache entry automatically.
+	 */
+	_sceneArCacheKey() {
+		return `scene|${serializeScene(this.getScene())}`;
+	}
+
+	/**
+	 * Export every current placement as one USDZ while preserving the arrangement.
+	 *
+	 * Only placement roots are cloned: studio shadows, the selection ring, grid,
+	 * lights and other preview helpers never enter the exported hierarchy.
+	 */
+	async _sceneUsdz() {
+		const { sceneToUsdzBlob } = await import('./usdz.js');
+		const group = new Group();
+		group.name = 'ARScene';
+
+		for (const [index, p] of this.placements.entries()) {
+			const instance = new Group();
+			instance.name = `Placement_${index + 1}_${p.id}`;
+
+			const copy = cloneSkinnedScene(p.group);
+
+			// Give every exported instance a unique USD-facing identity even when
+			// multiple placements came from the exact same source model.
+			copy.name = `${p.title || 'Model'}_${index + 1}_${p.id}`;
+
+			// Spawn animation temporarily shrinks group.scale; Quick Look should receive
+			// the size the person actually selected, not the animation's intermediate size.
+			copy.scale.setScalar(this._logicalScale(p));
+
+			instance.add(copy);
+			group.add(instance);
+		}
+
+		group.updateMatrixWorld(true);
+		return sceneToUsdzBlob(group);
+	}
+
+	/**
+	 * Prepare the composed scene before the user's tap. Safari requires Quick Look
+	 * to be opened synchronously from the click that launches it.
+	 */
+	_prepareArScene() {
+		const u = this.ui;
+		if (!u.arScene) return;
+
+		this._arSceneHandoff = null;
+		this._arSceneKey = '';
+
+		const count = this.placements.length;
+		const available = this.arMode === 'quicklook' && count > 1;
+
+		u.arScene.hidden = !available;
+		if (!available) return;
+
+		const key = this._sceneArCacheKey();
+		this._arSceneKey = key;
+		this._arKeys.add(key);
+
+		const label = u.arScene.querySelector('.ars-ar-scene-label');
+		u.arScene.disabled = true;
+		u.arScene.setAttribute('aria-busy', 'true');
+		if (label) label.textContent = `Preparing entire scene (${count} models)…`;
+
+		prepareNativeAr({
+			title: 'Entire scene',
+			key,
+			build: () => this._sceneUsdz(),
+		}, {
+			fallbackUrl: this.config.shareBaseUrl,
+		}).then((handoff) => {
+			if (this._destroyed || this._arSceneKey !== key) return;
+			this._arSceneHandoff = handoff;
+			u.arScene.disabled = false;
+			u.arScene.removeAttribute('aria-busy');
+			if (label) label.textContent = `Place entire scene (${count} models)`;
+		}).catch((err) => {
+			if (this._destroyed || this._arSceneKey !== key) return;
+			log.warn('whole-scene AR preparation failed', err);
+			u.arScene.disabled = true;
+			u.arScene.removeAttribute('aria-busy');
+			if (label) label.textContent = 'Entire scene unavailable';
+		});
+	}
+
+	/**
+	 * Fire the already-prepared whole-scene Quick Look hand-off synchronously.
+	 */
+	_onArSceneGo() {
+		const handoff = this._arSceneHandoff;
+		if (!handoff) return;
+
+		this._yieldCameraToNativeAr();
+
+		try {
+			handoff.open();
+		} catch (err) {
+			log.warn('whole-scene native AR failed to open', err);
+			this._setArStatus(`Could not open the scene in AR (${err?.message || err}).`, {
+				state: 'error',
+			});
+			return;
+		}
+
+		this._emit('native-ar-scene', {
+			count: this.placements.length,
+			viewer: handoff.viewer,
+		});
+		this._closeArSheet();
+		this._setStatus('Point at the floor, then drag to place the scene.');
+	}
+
 	/**
 	 * A picture of the model the sheet is about to send, rendered from the model
 	 * itself.
@@ -1731,6 +1854,8 @@ export class ArStudio {
 		const hadFocus = arModal.contains(document.activeElement);
 		arModal.hidden = true;
 		this._arToken++; // abandon any conversion still in flight for this sheet
+		this._arSceneHandoff = null;
+		this._arSceneKey = '';
 		if (hadFocus) this._restoreFocus(xrBtn);
 		this._emit('ar-sheet', { open: false });
 	}
@@ -1760,6 +1885,13 @@ export class ArStudio {
 		u.arQr.hidden = true;
 		u.arPicker.hidden = true;
 		u.arPicker.textContent = '';
+		this._arSceneHandoff = null;
+		this._arSceneKey = '';
+		if (u.arScene) {
+			u.arScene.hidden = true;
+			u.arScene.disabled = true;
+			u.arScene.removeAttribute('aria-busy');
+		}
 
 		if (!target) {
 			u.arThumb.textContent = '🪄';
@@ -1810,6 +1942,7 @@ export class ArStudio {
 		u.arGo.querySelector('.ars-ar-go-icon').hidden = false;
 		if (goLabel) goLabel.textContent = 'Place in your space';
 		this._prepareArTarget(target);
+		this._prepareArScene();
 	}
 
 	/**
