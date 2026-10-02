@@ -242,6 +242,13 @@ export function studioStyles() {
 	border-color: color-mix(in srgb, var(--ars-accent) 60%, transparent);
 	background: color-mix(in srgb, var(--ars-accent) 13%, transparent);
 }
+.ars-scene-row.is-hidden {
+	opacity: 0.56;
+}
+.ars-scene-row.is-hidden .ars-scene-select {
+	text-decoration: line-through;
+	text-decoration-thickness: 1px;
+}
 .ars-scene-select {
 	appearance: none;
 	width: 100%;

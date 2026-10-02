@@ -185,6 +185,7 @@ export function serializeScene(placements) {
 			z: Number(p.z) || 0,
 			yaw: Number(p.yaw) || 0,
 			scale: clamp(Number(p.scale) || 1, SCALE_MIN, SCALE_MAX),
+			...(p.visible === false ? { visible: false } : {}),
 		}))
 		.filter((p) => normalizeGlbUrl(p.src));
 	return JSON.stringify({ v: 1, items });
@@ -221,6 +222,7 @@ export function deserializeScene(json) {
 			z: clamp(z, -50, 50),
 			yaw: Number.isFinite(Number(it.yaw)) ? Number(it.yaw) : 0,
 			scale: clamp(Number(it.scale) || 1, SCALE_MIN, SCALE_MAX),
+			...(it.visible === false ? { visible: false } : {}),
 		});
 	}
 	return out;

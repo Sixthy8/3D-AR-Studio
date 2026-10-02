@@ -35,6 +35,36 @@ test('a placed arrangement round-trips through the hash exactly', () => {
 	assert.deepEqual(restored[1], placements[1]);
 });
 
+test('visibility round-trips without changing old visible scene payloads', () => {
+	const oldVisible = {
+		src: 'https://a.com/visible.glb',
+		title: 'Visible',
+		x: 1,
+		z: -2,
+		yaw: 0.25,
+		scale: 1,
+	};
+
+	const hidden = {
+		src: 'https://a.com/hidden.glb',
+		title: 'Hidden',
+		x: -1,
+		z: -3,
+		yaw: 0.5,
+		scale: 0.8,
+		visible: false,
+	};
+
+	const visibleJson = JSON.parse(serializeScene([oldVisible]));
+	assert.equal('visible' in visibleJson.items[0], false, 'visible:true is omitted for v1 compatibility');
+
+	const restoredVisible = deserializeScene(JSON.stringify({ v: 1, items: [oldVisible] }));
+	assert.deepEqual(restoredVisible[0], oldVisible, 'old v1 scenes remain byte-shape compatible');
+
+	const restoredHidden = sceneFromHashParam(sceneToHashParam([hidden]));
+	assert.equal(restoredHidden[0].visible, false, 'hidden state survives the share hash');
+});
+
 test('a hostile or corrupt scene payload degrades to empty, never throws', () => {
 	for (const bad of [null, undefined, '', 'not json', '{}', '[]', '{"v":2,"items":[]}', 'eyJhIjox']) {
 		assert.deepEqual(deserializeScene(bad), []);

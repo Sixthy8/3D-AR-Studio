@@ -481,6 +481,7 @@ export class ArStudio {
 					z: p.group.position.z,
 					yaw: p.yaw,
 					scale: this._logicalScale(p),
+					visible: p.visible !== false,
 				})),
 			));
 		} catch {
@@ -501,9 +502,11 @@ export class ArStudio {
 		}
 		selbar.hidden = false;
 		if (selName) selName.textContent = p.title || 'Model';
-		this.selRing.visible = !this.xrSession;
-		this._positionSelRing();
-		this._warmQuickLook();
+		this.selRing.visible = p.visible !== false && !this.xrSession;
+		if (p.visible !== false) {
+			this._positionSelRing();
+			this._warmQuickLook();
+		}
 		this._renderSceneTree();
 		this._emit('select', { placement: publicPlacement(p, this) });
 	}
@@ -596,7 +599,7 @@ export class ArStudio {
 	}
 
 	async _addModel({ src, title = '', poster = '' } = {}, {
-		x = null, z = null, yaw = null, scale = null, announce = true, persist = true,
+		x = null, z = null, yaw = null, scale = null, visible = true, announce = true, persist = true,
 		remote = false, netId = null, ownerId = null,
 	} = {}) {
 		const url = normalizeGlbUrl(src);
@@ -637,13 +640,14 @@ export class ArStudio {
 		const yawV = yaw ?? Math.atan2(this.camera.position.x - px, this.camera.position.z - pz);
 		group.rotation.y = yawV;
 		if (scale) group.scale.setScalar(Math.min(PINCH_SCALE_MAX, Math.max(PINCH_SCALE_MIN, scale)));
+		group.visible = visible !== false;
 		this.scene.add(group);
 
 		const shadow = this._makeShadow(tpl.radius);
 		if (shadow) {
 			shadow.position.set(px, 0.004, pz);
 			shadow.scale.setScalar(group.scale.x);
-			shadow.visible = !this.xrSession; // the XR session draws its own anchored shadows
+			shadow.visible = visible !== false && !this.xrSession; // hidden models have no preview shadow
 			this.scene.add(shadow);
 		}
 
@@ -659,6 +663,7 @@ export class ArStudio {
 			yaw: yawV,
 			baseRadius: tpl.radius,
 			height: tpl.height || 0,
+			visible: visible !== false,
 			spawnT: this.reducedMotion ? 1 : 0,
 			netId: netId || null,
 			ownerId: remote ? ownerId : null,
@@ -742,7 +747,8 @@ export class ArStudio {
 			onAction: async () => {
 				for (const it of items) {
 					await this._addModel({ src: it.src, title: it.title }, {
-						x: it.x, z: it.z, yaw: it.yaw, scale: it.scale, announce: false,
+						x: it.x, z: it.z, yaw: it.yaw, scale: it.scale,
+						visible: it.visible !== false, announce: false,
 					});
 				}
 			},
@@ -792,6 +798,7 @@ export class ArStudio {
 		for (const p of this.placements) {
 			const mine = this._isMine(p);
 			const selected = this.selected === p;
+			const visible = p.visible !== false;
 
 			const select = el('button', {
 				type: 'button',
@@ -820,6 +827,13 @@ export class ArStudio {
 				}),
 				el('button', {
 					type: 'button',
+					class: 'ars-scene-action',
+					'data-act': 'visibility',
+					text: visible ? 'Hide' : 'Show',
+					disabled: !mine,
+				}),
+				el('button', {
+					type: 'button',
 					class: 'ars-scene-action ars-scene-danger',
 					'data-act': 'remove',
 					text: 'Delete',
@@ -828,7 +842,7 @@ export class ArStudio {
 			]);
 
 			const row = el('div', {
-				class: `ars-scene-row${selected ? ' is-selected' : ''}`,
+				class: `ars-scene-row${selected ? ' is-selected' : ''}${visible ? '' : ' is-hidden'}`,
 				role: 'listitem',
 				'data-placement-id': p.id,
 			}, [
@@ -886,8 +900,33 @@ export class ArStudio {
 					z: p.group.position.z + 0.35,
 					yaw: p.yaw,
 					scale: this._logicalScale(p),
+					visible: p.visible !== false,
 				},
 			);
+			return;
+		}
+
+		if (act === 'visibility') {
+			if (!this._isMine(p)) {
+				this._setStatus('That model belongs to someone else in the room.', { warn: true });
+				return;
+			}
+
+			p.visible = p.visible === false;
+			p.group.visible = p.visible;
+			if (p.shadow) p.shadow.visible = p.visible && !this.xrSession;
+
+			if (!p.visible && this.selected === p) {
+				this._select(null);
+			} else {
+				this._renderSceneTree();
+			}
+
+			this._saveScene();
+			this._emit('visibility', {
+				placement: publicPlacement(p, this),
+				visible: p.visible,
+			});
 			return;
 		}
 
@@ -904,6 +943,7 @@ export class ArStudio {
 				z: p.group.position.z,
 				yaw: p.yaw,
 				scale: this._logicalScale(p),
+				visible: p.visible !== false,
 			};
 
 			this._removePlacement(p);
@@ -959,7 +999,8 @@ export class ArStudio {
 		}
 		for (const it of items) {
 			await this._addModel({ src: it.src, title: it.title }, {
-				x: it.x, z: it.z, yaw: it.yaw, scale: it.scale, announce: false, persist: false,
+				x: it.x, z: it.z, yaw: it.yaw, scale: it.scale,
+				visible: it.visible !== false, announce: false, persist: false,
 			});
 		}
 		// Deep-linked models land in front of the camera, skipping any already
@@ -1797,7 +1838,9 @@ export class ArStudio {
 		const group = new Group();
 		group.name = 'ARScene';
 
-		for (const [index, p] of this.placements.entries()) {
+		const visiblePlacements = this.placements.filter((p) => p.visible !== false);
+
+		for (const [index, p] of visiblePlacements.entries()) {
 			const instance = new Group();
 			instance.name = `Placement_${index + 1}_${p.id}`;
 
@@ -1830,7 +1873,7 @@ export class ArStudio {
 		this._arSceneHandoff = null;
 		this._arSceneKey = '';
 
-		const count = this.placements.length;
+		const count = this.placements.filter((p) => p.visible !== false).length;
 		const available = this.arMode === 'quicklook' && count > 1;
 
 		u.arScene.hidden = !available;
@@ -2398,7 +2441,7 @@ export class ArStudio {
 		for (const p of this.placements) {
 			p.group.position.y = 0;
 			if (p.shadow) {
-				p.shadow.visible = true;
+				p.shadow.visible = p.visible !== false;
 				p.shadow.position.set(p.group.position.x, 0.004, p.group.position.z);
 			}
 		}
@@ -2963,6 +3006,7 @@ export class ArStudio {
 			z: p.group.position.z,
 			yaw: p.yaw,
 			scale: this._logicalScale(p),
+			visible: p.visible !== false,
 		}));
 	}
 
@@ -2971,7 +3015,8 @@ export class ArStudio {
 		this.clear();
 		for (const it of Array.isArray(items) ? items : []) {
 			await this._addModel({ src: it.src, title: it.title }, {
-				x: it.x, z: it.z, yaw: it.yaw, scale: it.scale, announce: false, persist: false,
+				x: it.x, z: it.z, yaw: it.yaw, scale: it.scale,
+				visible: it.visible !== false, announce: false, persist: false,
 			});
 		}
 		this._saveScene();
@@ -3147,6 +3192,7 @@ function publicPlacement(p, studio) {
 		z: p.group.position.z,
 		yaw: p.yaw,
 		scale: studio._logicalScale(p),
+		visible: p.visible !== false,
 		mine: studio._isMine(p),
 	};
 }
