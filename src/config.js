@@ -83,6 +83,11 @@ export const DEFAULTS = {
 	},
 	/** Base URL that share links + QR codes point at. Defaults to the page itself. */
 	shareBaseUrl: '',
+	/**
+	 * Optional endpoint that stores a complete scene and returns a short share URL.
+	 * Leave blank to use the portable #s= scene URL only.
+	 */
+	sceneShareEndpoint: '',
 	/** localStorage key for the persisted scene. Change it to run two studios on one origin. */
 	persistKey: 'ar-studio:scene:v1',
 	/** Cap on simultaneous placements. Keeps low-end phones interactive. */

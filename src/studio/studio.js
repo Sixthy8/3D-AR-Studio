@@ -2253,34 +2253,113 @@ export class ArStudio {
 		}
 	}
 
-	_openQr() {
+	/**
+	 * Store the current composed scene and return the server's compact share URL.
+	 * Any failure returns an empty string so sharing can fall back to #s=.
+	 */
+	async _shortSceneUrl() {
+		const endpoint = String(this.config.sceneShareEndpoint || '').trim();
+		if (!endpoint || !this.placements.length) return '';
+
+		const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+		const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+
+		try {
+			const res = await fetch(endpoint, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					scene: JSON.parse(serializeScene(this.getScene())),
+				}),
+				...(controller ? { signal: controller.signal } : {}),
+			});
+
+			if (!res.ok) throw new Error(`scene share returned ${res.status}`);
+
+			const payload = await res.json();
+			const url = String(payload?.url || '').trim();
+
+			// The wrapper may return either an absolute HTTPS URL or a same-origin path.
+			if (url.startsWith('/') && !url.startsWith('//')) {
+				return new URL(url, location.origin).href;
+			}
+
+			if (/^https:\/\//i.test(url)) return url;
+
+			throw new Error('scene share returned an invalid URL');
+		} catch (err) {
+			log.warn('short scene link unavailable; using portable scene URL', err);
+			return '';
+		} finally {
+			if (timer) clearTimeout(timer);
+		}
+	}
+
+	async _openQr() {
 		const { qrModal, qrBox, qrLink } = this.ui;
 		if (!qrModal) return;
+
 		this._lastFocus = document.activeElement;
-		const url = this.shareUrl();
+
+		// The portable URL is always available and contains the exact current
+		// arrangement. It remains the fallback if the optional scene store is down.
+		const portableUrl = this.shareUrl();
+
+		qrModal.hidden = false;
+
+		if (qrBox) {
+			qrBox.textContent = this.config.sceneShareEndpoint
+				? 'Preparing scene link…'
+				: '';
+		}
+
+		if (qrLink) {
+			qrLink.href = portableUrl;
+			qrLink.textContent = portableUrl.length > 72
+				? `${portableUrl.slice(0, 69)}…`
+				: portableUrl;
+		}
+
+		// aria-modal is a promise that focus is inside the dialog.
+		this.ui.qrClose?.focus?.();
+
+		const shortUrl = await this._shortSceneUrl();
+		const url = shortUrl || portableUrl;
+
+		// The person may have closed the sheet while the API request was running.
+		if (qrModal.hidden) return;
+
 		if (qrBox) {
 			try {
-				qrBox.innerHTML = renderQRToSVG(url, { scale: 6, margin: 2, dark: '#0b0b0b', light: '#ffffff' });
+				qrBox.innerHTML = renderQRToSVG(url, {
+					scale: 6,
+					margin: 2,
+					dark: '#0b0b0b',
+					light: '#ffffff',
+				});
 			} catch {
-				// The arrangement hash can outgrow the encoder; a models-only QR still
-				// beats a wall of text, and the full link below keeps the arrangement.
+				// This should normally only be reachable when no short-link endpoint is
+				// configured or available. Preserve the original models-only QR fallback.
 				try {
-					qrBox.innerHTML = renderQRToSVG(studioShareUrl(this.config.shareBaseUrl, this.getScene()), {
-						scale: 6, margin: 2, dark: '#0b0b0b', light: '#ffffff',
-					});
+					qrBox.innerHTML = renderQRToSVG(
+						studioShareUrl(this.config.shareBaseUrl, this.getScene()),
+						{ scale: 6, margin: 2, dark: '#0b0b0b', light: '#ffffff' },
+					);
 				} catch {
 					qrBox.textContent = url;
 				}
 			}
 		}
+
 		if (qrLink) {
 			qrLink.href = url;
 			qrLink.textContent = url.length > 72 ? `${url.slice(0, 69)}…` : url;
 		}
-		qrModal.hidden = false;
-		// aria-modal is a promise that focus is inside the dialog.
-		this.ui.qrClose?.focus?.();
-		this._emit('share', { url });
+
+		this._emit('share', {
+			url,
+			short: Boolean(shortUrl),
+		});
 	}
 
 	_closeQr() {
