@@ -26,7 +26,8 @@
 import {
 	AnimationMixer, Box3, CanvasTexture, Color, DirectionalLight, Fog, GridHelper, Group,
 	HemisphereLight, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry,
-	Raycaster, RingGeometry, Scene, Vector2, Vector3, WebGLRenderer, WebGLRenderTarget,
+	Raycaster, RingGeometry, Scene, TextureLoader, Vector2, Vector3,
+	WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { clone as cloneSkinnedScene } from 'three/addons/utils/SkeletonUtils.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
@@ -57,8 +58,10 @@ import {
 	PINCH_SCALE_MAX, PINCH_SCALE_MIN,
 } from './pinch.js';
 import {
-	deserializeScene, fitTransform, MAX_PLACEMENTS, normalizeGlbUrl, roomLightFromPixels,
-	sceneFromHashParam, serializeScene, SPAWN_DISTANCE_M, spawnPointInFront,
+	deserializeScene, deserializeSceneDocument, fitTransform, MAX_PLACEMENTS,
+	normalizeGlbUrl, normalizeSceneTarget, normalizeSceneType, roomLightFromPixels,
+	sceneDocumentFromHashParam, sceneFromHashParam, serializeScene,
+	SPAWN_DISTANCE_M, spawnPointInFront,
 	studioSceneUrl, studioShareUrl, touchAngle, twistDelta,
 } from './scene-math.js';
 import {
@@ -200,6 +203,21 @@ export class ArStudio {
 	_initState() {
 		/** @type {Array<object>} */
 		this.placements = [];
+
+		// Scene-document metadata. `free` scenes remain exactly compatible with
+		// the historical placement-only format; marker scenes add optional target
+		// metadata around those same placements.
+		this.sceneType = 'free';
+		this.sceneTarget = null;
+
+		// Editor-only target preview. This is deliberately not a placement, so it
+		// cannot be selected, grouped, duplicated, deleted, or exported to USDZ.
+		this.targetPreview = {
+			mesh: null,
+			texture: null,
+		};
+
+		this._targetTextureToken = 0;
 
 		// `selected` remains the single-object transform target.
 		// `_selection` is editor-only and may contain zero, one, or many placement IDs.
@@ -360,6 +378,43 @@ export class ArStudio {
 		bind(u.sceneClose, 'click', () => this._closeSceneTree());
 		bind(u.sceneList, 'click', (e) => this._onSceneTreeClick(e));
 
+		bind(u.sceneTypeSelect, 'change', () => {
+			this._setSceneType(u.sceneTypeSelect.value);
+		});
+
+		bind(u.sceneTargetWidth, 'change', () => {
+			this._updateSceneTargetFromUI();
+		});
+
+		bind(u.sceneTargetHeight, 'change', () => {
+			this._updateSceneTargetFromUI();
+		});
+
+		bind(u.sceneTargetVisible, 'change', () => {
+			this._updateSceneTargetFromUI();
+		});
+
+		bind(u.sceneTargetChoose, 'click', () => {
+			u.sceneTargetFile?.click();
+		});
+
+		bind(u.sceneTargetFile, 'change', () => {
+			const file = u.sceneTargetFile?.files?.[0];
+			if (file) this._uploadTargetImage(file);
+		});
+
+		bind(u.sceneTargetRemove, 'click', () => {
+			this._removeTargetImage();
+		});
+
+		bind(u.sceneFocusTarget, 'click', () => {
+			this._focusTargetView();
+		});
+
+		bind(u.sceneResetView, 'click', () => {
+			this._resetEditorView();
+		});
+
 		bind(u.roomBtn, 'click', () => this._openRoomModal());
 		bind(u.roomClose, 'click', () => this._closeRoomModal());
 		bind(u.roomModal, 'click', (e) => { if (e.target === u.roomModal) this._closeRoomModal(); });
@@ -445,6 +500,11 @@ export class ArStudio {
 		bind(c, 'pointermove', (e) => this._onPointerMove(e));
 		bind(c, 'pointerup', (e) => this._onPointerUp(e));
 		bind(c, 'pointercancel', () => { this._pointer = null; });
+
+		// Desktop editor navigation. Wheel/trackpad changes camera position only;
+		// scene/model scale remains physically correct.
+		bind(c, 'wheel', (e) => this._onEditorWheel(e), { passive: false });
+
 		bind(c, 'touchstart', (e) => this._onTouchStart(e), { passive: true });
 		bind(c, 'touchmove', (e) => this._onTouchMove(e), { passive: true });
 		bind(c, 'touchend', () => this._onTouchEnd(), { passive: true });
@@ -552,9 +612,375 @@ export class ArStudio {
 		if (clearBtn) clearBtn.hidden = n === 0;
 		if (empty) empty.hidden = n > 0;
 		if (photoBtn) photoBtn.disabled = n === 0;
-		if (this.ui.sceneBtn) this.ui.sceneBtn.hidden = n === 0;
-		if (n === 0) this._closeSceneTree();
+		// Scene setup exists independently of placements. An empty marker scene is
+		// still a valid document, so the Scene panel must always remain reachable.
+		if (this.ui.sceneBtn) this.ui.sceneBtn.hidden = false;
 		this._renderSceneTree();
+	}
+
+	// ── Scene document / marker target ───────────────────────────────────────
+
+	_sceneMetadata() {
+		return {
+			type: this.sceneType,
+			target: this.sceneTarget
+				? { ...this.sceneTarget }
+				: null,
+		};
+	}
+
+	_defaultSceneTarget(type) {
+		const orientation = type === 'marker-vertical'
+			? 'vertical'
+			: 'horizontal';
+
+		// Useful print defaults:
+		// horizontal = US business card, vertical = 18 × 24 inch poster.
+		const width = orientation === 'vertical' ? 0.4572 : 0.0889;
+		const height = orientation === 'vertical' ? 0.6096 : 0.0508;
+
+		return {
+			id: `target-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+			width,
+			height,
+			orientation,
+			visible: true,
+		};
+	}
+
+	_setSceneType(raw, { persist = true } = {}) {
+		const next = normalizeSceneType(raw);
+
+		if (next === 'free') {
+			this.sceneType = 'free';
+			this.sceneTarget = null;
+		} else {
+			const previous = this.sceneTarget;
+			const nextOrientation = next === 'marker-vertical'
+				? 'vertical'
+				: 'horizontal';
+
+			this.sceneType = next;
+
+			// Preserve dimensions while staying in the same marker orientation.
+			// Switching horizontal <-> vertical starts with the appropriate physical
+			// print preset instead of carrying a business card into poster mode.
+			const sameOrientation =
+				previous?.orientation === nextOrientation;
+
+			this.sceneTarget = normalizeSceneTarget({
+				...(sameOrientation
+					? previous
+					: this._defaultSceneTarget(next)),
+				orientation: nextOrientation,
+			}, next) || this._defaultSceneTarget(next);
+		}
+
+		this._syncTargetPreview();
+		this._syncSceneSetupUI();
+		this._updateCount();
+
+		if (persist) this._saveScene();
+
+		this._emit('scene-type', {
+			type: this.sceneType,
+			target: this.sceneTarget ? { ...this.sceneTarget } : null,
+		});
+	}
+
+	_updateSceneTargetFromUI() {
+		if (this.sceneType === 'free' || !this.sceneTarget) return;
+
+		const widthMm = Number(this.ui.sceneTargetWidth?.value);
+		const heightMm = Number(this.ui.sceneTargetHeight?.value);
+
+		const candidate = {
+			...this.sceneTarget,
+			width: Number.isFinite(widthMm)
+				? widthMm / 1000
+				: this.sceneTarget.width,
+			height: Number.isFinite(heightMm)
+				? heightMm / 1000
+				: this.sceneTarget.height,
+			visible: Boolean(this.ui.sceneTargetVisible?.checked),
+		};
+
+		const normalized = normalizeSceneTarget(candidate, this.sceneType);
+
+		if (!normalized) {
+			this._syncSceneSetupUI();
+			this._setStatus(
+				'Target dimensions must be greater than zero.',
+				{ warn: true },
+			);
+			return;
+		}
+
+		this.sceneTarget = normalized;
+		this._syncTargetPreview();
+		this._syncSceneSetupUI();
+		this._saveScene();
+
+		this._emit('target', {
+			type: this.sceneType,
+			target: { ...this.sceneTarget },
+		});
+	}
+
+	async _uploadTargetImage(file) {
+		if (this.sceneType === 'free' || !this.sceneTarget || !file) return;
+
+		const type = String(file.type || '').toLowerCase();
+
+		if (type !== 'image/png' && type !== 'image/jpeg') {
+			this._setStatus('Choose a PNG or JPEG target image.', { warn: true });
+			return;
+		}
+
+		if (file.size > 10 * 1024 * 1024) {
+			this._setStatus('Target image must be 10 MB or smaller.', { warn: true });
+			return;
+		}
+
+		this._setStatus('Uploading target image…', { sticky: true });
+
+		try {
+			const response = await fetch('/api/targets', {
+				method: 'POST',
+				headers: {
+					'content-type': type,
+					'x-file-name': String(file.name || '').slice(0, 180),
+				},
+				body: file,
+			});
+
+			const result = await response.json().catch(() => ({}));
+
+			if (!response.ok || !result.image) {
+				throw new Error(result.error || `upload failed (${response.status})`);
+			}
+
+			this.sceneTarget = normalizeSceneTarget({
+				...this.sceneTarget,
+				image: result.image,
+			}, this.sceneType);
+
+			this._syncTargetPreview();
+			this._syncSceneSetupUI();
+			this._saveScene();
+
+			this._emit('target-image', {
+				target: { ...this.sceneTarget },
+				image: result.image,
+			});
+
+			this._setStatus('Target image added.');
+		} catch (err) {
+			this._setStatus(
+				`Target image upload failed: ${err?.message || err}`,
+				{ warn: true },
+			);
+		} finally {
+			if (this.ui.sceneTargetFile) {
+				this.ui.sceneTargetFile.value = '';
+			}
+		}
+	}
+
+	_removeTargetImage() {
+		if (this.sceneType === 'free' || !this.sceneTarget) return;
+
+		const {
+			image,
+			...rest
+		} = this.sceneTarget;
+
+		this.sceneTarget = normalizeSceneTarget(
+			rest,
+			this.sceneType,
+		) || this._defaultSceneTarget(this.sceneType);
+
+		this._syncTargetPreview();
+		this._syncSceneSetupUI();
+		this._saveScene();
+
+		this._emit('target-image', {
+			target: { ...this.sceneTarget },
+			image: '',
+		});
+
+		this._setStatus('Target image removed.');
+	}
+
+	_syncSceneSetupUI() {
+		const u = this.ui;
+
+		if (u.sceneTypeSelect) {
+			u.sceneTypeSelect.value = this.sceneType;
+		}
+
+		const markerMode = this.sceneType !== 'free' && !!this.sceneTarget;
+
+		if (u.sceneTargetSettings) {
+			u.sceneTargetSettings.hidden = !markerMode;
+		}
+
+		if (!markerMode) return;
+
+		if (u.sceneTargetWidth && document.activeElement !== u.sceneTargetWidth) {
+			u.sceneTargetWidth.value = String(
+				Math.round(this.sceneTarget.width * 100000) / 100,
+			);
+		}
+
+		if (u.sceneTargetHeight && document.activeElement !== u.sceneTargetHeight) {
+			u.sceneTargetHeight.value = String(
+				Math.round(this.sceneTarget.height * 100000) / 100,
+			);
+		}
+
+		if (u.sceneTargetVisible) {
+			u.sceneTargetVisible.checked = this.sceneTarget.visible !== false;
+		}
+
+		const imageUrl = String(this.sceneTarget.image || '');
+
+		if (u.sceneTargetImageName) {
+			u.sceneTargetImageName.textContent = imageUrl
+				? decodeURIComponent(imageUrl.split('/').pop() || 'Target image')
+				: 'No target image selected';
+		}
+
+		if (u.sceneTargetChoose) {
+			u.sceneTargetChoose.textContent = imageUrl ? 'Replace Image' : 'Choose Image';
+		}
+
+		if (u.sceneTargetRemove) {
+			u.sceneTargetRemove.hidden = !imageUrl;
+		}
+
+		if (u.sceneTargetOrientation) {
+			u.sceneTargetOrientation.textContent =
+				this.sceneType === 'marker-vertical'
+					? 'Vertical target · build in front'
+					: 'Horizontal target · build above';
+		}
+	}
+
+	_disposeTargetPreview() {
+		this._targetTextureToken++;
+		const mesh = this.targetPreview?.mesh;
+
+		if (mesh) {
+			this.scene.remove(mesh);
+			mesh.geometry?.dispose?.();
+			mesh.material?.dispose?.();
+		}
+
+		this.targetPreview?.texture?.dispose?.();
+
+		if (this.targetPreview) {
+			this.targetPreview.mesh = null;
+			this.targetPreview.texture = null;
+		}
+	}
+
+	_syncTargetPreview() {
+		this._disposeTargetPreview();
+
+		if (
+			this.sceneType === 'free'
+			|| !this.sceneTarget
+			|| this.sceneTarget.visible === false
+		) {
+			return;
+		}
+
+		const width = this.sceneTarget.width;
+		const height = this.sceneTarget.height;
+
+		const texture = makeTargetPreviewTexture({
+			orientation: this.sceneTarget.orientation,
+		});
+
+		const material = new MeshBasicMaterial({
+			map: texture || null,
+			color: texture ? 0xffffff : 0x6f65c8,
+			transparent: true,
+			opacity: 0.78,
+			depthWrite: false,
+			side: 2,
+		});
+
+		const mesh = new Mesh(
+			new PlaneGeometry(width, height),
+			material,
+		);
+
+		mesh.name = 'AR Studio target preview';
+		mesh.userData.editorOnly = true;
+		mesh.userData.lockedTarget = true;
+		mesh.renderOrder = 2;
+
+		// The logical marker origin remains the scene anchor, but the editor
+		// preview is displayed in the normal forward authoring workspace rather
+		// than directly underneath/on top of the camera at world z=0.
+		const editorZ = -SPAWN_DISTANCE_M;
+
+		if (this.sceneType === 'marker-horizontal') {
+			mesh.rotation.x = -Math.PI / 2;
+			mesh.position.set(0, 0.004, editorZ);
+		} else {
+			// Stand the print piece on the floor. PlaneGeometry is centre-origin,
+			// so half-height lifts its bottom edge exactly onto Y=0.
+			mesh.position.set(0, height / 2, editorZ - 0.015);
+		}
+
+		this.targetPreview.texture = texture;
+		this.targetPreview.mesh = mesh;
+		this.scene.add(mesh);
+
+		const imageUrl = String(this.sceneTarget.image || '');
+
+		if (imageUrl) {
+			const token = ++this._targetTextureToken;
+			const loader = new TextureLoader();
+
+			loader.load(
+				imageUrl,
+				(realTexture) => {
+					if (
+						token !== this._targetTextureToken
+						|| this.targetPreview?.mesh !== mesh
+					) {
+						realTexture.dispose();
+						return;
+					}
+
+					const previous = this.targetPreview.texture;
+
+					mesh.material.map = realTexture;
+					mesh.material.color.set(0xffffff);
+					mesh.material.opacity = 0.92;
+					mesh.material.needsUpdate = true;
+
+					this.targetPreview.texture = realTexture;
+
+					if (previous && previous !== realTexture) {
+						previous.dispose();
+					}
+				},
+				undefined,
+				() => {
+					if (token === this._targetTextureToken) {
+						this._setStatus(
+							'Target image could not be loaded; using the marker placeholder.',
+							{ warn: true },
+						);
+					}
+				},
+			);
+		}
 	}
 
 	// ── Placements ────────────────────────────────────────────────────────────
@@ -582,6 +1008,7 @@ export class ArStudio {
 					visible: p.visible !== false,
 					group: p.groupId || undefined,
 				})),
+				this._sceneMetadata(),
 			));
 		} catch {
 			// Storage full or blocked: the live scene is unaffected.
@@ -2179,36 +2606,102 @@ export class ArStudio {
 	// ── Restore + deep links ──────────────────────────────────────────────────
 
 	async _restoreScene({ skipLocal = false } = {}) {
-		// A `#s=` hash is a full shared arrangement: it opens like a document,
-		// replacing the working scene rather than merging into it.
-		const hashParams = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
-		const shared = skipLocal ? [] : sceneFromHashParam(hashParams.get('s'));
+		// A #s= hash is a complete scene document. Invalid hashes retain the old
+		// behavior and fall back to the local working document.
+		const hashParams = new URLSearchParams(
+			String(location.hash || '').replace(/^#/, ''),
+		);
 
-		let items = shared;
-		if (!items.length && !skipLocal && this.config.persist !== false) {
-			try { items = deserializeScene(localStorage.getItem(this.config.persistKey)); } catch { items = []; }
+		const rawShared = skipLocal ? '' : String(hashParams.get('s') || '');
+		let documentData = null;
+		let sharedUsed = false;
+
+		if (rawShared) {
+			const candidate = sceneDocumentFromHashParam(rawShared);
+
+			if (
+				candidate.items.length
+				|| candidate.type !== 'free'
+				|| candidate.target
+			) {
+				documentData = candidate;
+				sharedUsed = true;
+			}
 		}
+
+		if (!documentData && !skipLocal && this.config.persist !== false) {
+			try {
+				documentData = deserializeSceneDocument(
+					localStorage.getItem(this.config.persistKey),
+				);
+			} catch {
+				documentData = null;
+			}
+		}
+
+		if (!documentData) {
+			documentData = {
+				type: 'free',
+				target: null,
+				items: [],
+			};
+		}
+
+		this.sceneType = normalizeSceneType(documentData.type);
+		this.sceneTarget = normalizeSceneTarget(
+			documentData.target,
+			this.sceneType,
+		);
+
+		if (this.sceneType !== 'free' && !this.sceneTarget) {
+			this.sceneTarget = this._defaultSceneTarget(this.sceneType);
+		}
+
+		this._syncTargetPreview();
+		this._syncSceneSetupUI();
+
+		const items = documentData.items;
+
 		for (const it of items) {
 			await this._addModel({ src: it.src, title: it.title }, {
-				x: it.x, y: it.y ?? 0, z: it.z, yaw: it.yaw, scale: it.scale,
+				x: it.x,
+				y: it.y ?? 0,
+				z: it.z,
+				yaw: it.yaw,
+				scale: it.scale,
 				visible: it.visible !== false,
 				groupId: it.group || null,
 				announce: false,
 				persist: false,
 			});
 		}
+
 		// Deep-linked models land in front of the camera, skipping any already
 		// restored at an arranged spot.
 		const have = new Set(this.placements.map((p) => p.src));
+
 		for (const it of this.config.urlModels || []) {
 			if (have.has(it.src)) continue;
 			await this._addModel(it, { announce: false });
 		}
+
 		if (this.placements.length) {
 			this._select(this.placements[this.placements.length - 1]);
-			if (shared.length) this._setStatus('Shared scene loaded, exactly as arranged. Clear to start fresh.');
-			else this._setStatus(this.config.urlModels?.length ? 'Models loaded: turn on the camera to see them in your space.' : 'Your scene is back.');
 		}
+
+		if (sharedUsed) {
+			this._setStatus(
+				'Shared scene loaded, exactly as arranged. Clear to start fresh.',
+			);
+		} else if (this.placements.length) {
+			this._setStatus(
+				this.config.urlModels?.length
+					? 'Models loaded: turn on the camera to see them in your space.'
+					: 'Your scene is back.',
+			);
+		}
+
+		this._updateCount();
 		this._saveScene();
 	}
 
@@ -2457,6 +2950,146 @@ export class ArStudio {
 			pitch: this.cameraPitch,
 		};
 	}
+	// ── Editor camera navigation ──────────────────────────────────────────────
+
+	_lookAtEditorPoint(point) {
+		if (!point) return;
+
+		const dx = point.x - this.camera.position.x;
+		const dy = point.y - this.camera.position.y;
+		const dz = point.z - this.camera.position.z;
+		const horizontal = Math.hypot(dx, dz);
+
+		if (!(horizontal > 1e-6) && Math.abs(dy) < 1e-6) return;
+
+		this.cameraYaw = Math.atan2(dx, -dz);
+		this.cameraPitch = clampPitch(
+			Math.atan2(dy, Math.max(horizontal, 1e-6)),
+			PITCH_MIN,
+			PITCH_MAX,
+		);
+
+		this._applyCameraLook();
+	}
+
+	_focusTargetView() {
+		if (
+			this.arActive
+			|| this.xrSession
+			|| this.sceneType === 'free'
+			|| !this.sceneTarget
+		) return;
+
+		const mesh = this.targetPreview?.mesh;
+
+		// The preview may be hidden, but its logical editor location remains the
+		// same, so Focus Target must still work.
+		const centre = mesh
+			? mesh.position.clone()
+			: new Vector3(
+				0,
+				this.sceneType === 'marker-vertical'
+					? this.sceneTarget.height / 2
+					: 0.004,
+				-SPAWN_DISTANCE_M,
+			);
+
+		const width = this.sceneTarget.width;
+		const height = this.sceneTarget.height;
+
+		const verticalFov = this.camera.fov * (Math.PI / 180);
+		const horizontalFov = 2 * Math.atan(
+			Math.tan(verticalFov / 2) * Math.max(this.camera.aspect, 0.1),
+		);
+
+		if (this.sceneType === 'marker-vertical') {
+			const distanceForHeight =
+				height / (2 * Math.tan(verticalFov / 2));
+
+			const distanceForWidth =
+				width / (2 * Math.tan(horizontalFov / 2));
+
+			const distance = Math.max(
+				0.18,
+				Math.max(distanceForHeight, distanceForWidth) * 1.35,
+			);
+
+			this.camera.position.set(
+				centre.x,
+				centre.y,
+				centre.z + distance,
+			);
+		} else {
+			// Look down at a flat target from a comfortable three-quarter angle.
+			// The physical target remains true scale; only the editor camera moves.
+			const maxDimension = Math.max(width, height);
+
+			const distance = Math.max(
+				0.20,
+				(maxDimension / (2 * Math.tan(verticalFov / 2))) * 1.9,
+			);
+
+			this.camera.position.set(
+				centre.x,
+				centre.y + distance * 0.82,
+				centre.z + distance * 0.58,
+			);
+		}
+
+		this._userLooked = true;
+		this._lookAtEditorPoint(centre);
+		this._setStatus('Target framed.');
+	}
+
+	_resetEditorView() {
+		if (this.arActive || this.xrSession) return;
+
+		this.camera.position.set(0, EYE_HEIGHT_M, 0);
+		this.cameraYaw = 0;
+		this.cameraPitch = -0.24;
+		this._userLooked = false;
+
+		this._applyCameraLook();
+		this._setStatus('Editor view reset.');
+	}
+
+	_onEditorWheel(e) {
+		if (
+			this.arActive
+			|| this.xrSession
+			|| this._gizmoDragging
+			|| this.transformControls?.axis
+		) return;
+
+		e.preventDefault();
+
+		const forward = this.camera.getWorldDirection(new Vector3());
+
+		if (forward.lengthSq() < 1e-8) return;
+		forward.normalize();
+
+		// deltaY < 0 = toward scene, deltaY > 0 = away.
+		// Clamp individual events so aggressive trackpad gestures stay controllable.
+		const amount = Math.max(
+			-0.75,
+			Math.min(0.75, -Number(e.deltaY || 0) * 0.0015),
+		);
+
+		const next = this.camera.position.clone().addScaledVector(
+			forward,
+			amount,
+		);
+
+		// Keep the editor camera in a sane workspace. These are navigation limits,
+		// not scene limits and are never persisted.
+		next.x = Math.max(-30, Math.min(30, next.x));
+		next.y = Math.max(0.03, Math.min(12, next.y));
+		next.z = Math.max(-30, Math.min(30, next.z));
+
+		this.camera.position.copy(next);
+		this._userLooked = true;
+	}
+
 	// ── Pointer + touch gestures (XR has its own) ─────────────────────────────
 
 	_viewportSize() {
@@ -3722,7 +4355,10 @@ export class ArStudio {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
-					scene: JSON.parse(serializeScene(this.getScene())),
+					scene: JSON.parse(serializeScene(
+						this.getScene(),
+						this._sceneMetadata(),
+					)),
 				}),
 				...(controller ? { signal: controller.signal } : {}),
 			});
@@ -4261,9 +4897,23 @@ export class ArStudio {
 		this._saveScene();
 	}
 
+	/** Full scene document, including optional marker metadata. */
+	getSceneDocument() {
+		return {
+			v: 1,
+			...this._sceneMetadata(),
+			items: this.getScene(),
+		};
+	}
+
 	/** A link that reopens this exact arrangement, models and transforms included. */
 	shareUrl() {
-		return studioSceneUrl(this.config.shareBaseUrl, this.getScene());
+		return studioSceneUrl(
+			this.config.shareBaseUrl,
+			this.getScene(),
+			1500,
+			this._sceneMetadata(),
+		);
 	}
 
 	/** Generate a model from a prompt and drop it into the scene. */
@@ -4358,6 +5008,7 @@ export class ArStudio {
 		this.transformHelper = null;
 
 		for (const p of [...this.placements]) this._removePlacement(p, { persist: false, broadcast: false });
+		this._disposeTargetPreview();
 		this.shadowTex?.dispose();
 		this.selRing.geometry.dispose();
 		this.selRing.material.dispose();
@@ -4374,6 +5025,68 @@ function prefersReducedMotion() {
 		return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 	} catch {
 		return false;
+	}
+}
+
+function makeTargetPreviewTexture({ orientation = 'horizontal' } = {}) {
+	try {
+		const width = 768;
+		const height = 512;
+		const cnv = document.createElement('canvas');
+
+		cnv.width = width;
+		cnv.height = height;
+
+		const ctx = cnv.getContext('2d');
+		if (!ctx) return null;
+
+		ctx.fillStyle = '#171923';
+		ctx.fillRect(0, 0, width, height);
+
+		const cell = 64;
+		for (let y = 0; y < height; y += cell) {
+			for (let x = 0; x < width; x += cell) {
+				if (((x / cell) + (y / cell)) % 2 === 0) {
+					ctx.fillStyle = '#202536';
+					ctx.fillRect(x, y, cell, cell);
+				}
+			}
+		}
+
+		ctx.strokeStyle = '#8b7cf8';
+		ctx.lineWidth = 10;
+		ctx.strokeRect(8, 8, width - 16, height - 16);
+
+		ctx.strokeStyle = 'rgba(255,255,255,0.32)';
+		ctx.lineWidth = 3;
+		ctx.beginPath();
+		ctx.moveTo(width / 2, 32);
+		ctx.lineTo(width / 2, height - 32);
+		ctx.moveTo(32, height / 2);
+		ctx.lineTo(width - 32, height / 2);
+		ctx.stroke();
+
+		ctx.fillStyle = '#ffffff';
+		ctx.font = '700 52px system-ui, sans-serif';
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+		ctx.fillText('TARGET', width / 2, height / 2 - 18);
+
+		ctx.fillStyle = 'rgba(255,255,255,0.72)';
+		ctx.font = '500 26px system-ui, sans-serif';
+		ctx.fillText(
+			orientation === 'vertical'
+				? 'VERTICAL MARKER'
+				: 'HORIZONTAL MARKER',
+			width / 2,
+			height / 2 + 42,
+		);
+
+		const texture = new CanvasTexture(cnv);
+		texture.needsUpdate = true;
+		return texture;
+	} catch {
+		return null;
 	}
 }
 

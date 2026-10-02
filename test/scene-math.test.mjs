@@ -8,8 +8,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-	deserializeScene, fitTransform, normalizeGlbUrl, parseSrcParams, roomLightFromPixels,
-	sceneFromHashParam, sceneToHashParam, serializeScene, spawnPointInFront,
+	deserializeScene, deserializeSceneDocument, fitTransform, normalizeGlbUrl,
+	normalizeSceneTarget, normalizeSceneType, parseSrcParams, roomLightFromPixels,
+	sceneDocumentFromHashParam, sceneFromHashParam, sceneToHashParam,
+	serializeScene, spawnPointInFront,
 	studioSceneUrl, studioShareUrl, twistDelta, MAX_PLACEMENTS, SCALE_MIN, SCALE_MAX,
 } from '../src/studio/scene-math.js';
 
@@ -22,6 +24,111 @@ test('normalizeGlbUrl accepts https and site-relative, rejects everything else',
 	]) {
 		assert.equal(normalizeGlbUrl(hostile), null, `${String(hostile)} must be rejected`);
 	}
+});
+
+test('free scenes keep the historical v1 document shape', () => {
+	const item = {
+		src: 'https://a.com/free.glb',
+		title: 'Free',
+		x: 0,
+		z: -2,
+		yaw: 0,
+		scale: 1,
+	};
+
+	const doc = JSON.parse(serializeScene([item]));
+
+	assert.deepEqual(Object.keys(doc), ['v', 'items']);
+	assert.equal(doc.v, 1);
+	assert.equal('type' in doc, false);
+	assert.equal('target' in doc, false);
+});
+
+test('marker scene metadata round-trips through storage and share hashes', () => {
+	const placements = [{
+		src: 'https://a.com/product.glb',
+		title: 'Product',
+		x: 0,
+		y: 0.15,
+		z: -0.1,
+		yaw: 0,
+		scale: 1,
+	}];
+
+	const metadata = {
+		type: 'marker-horizontal',
+		target: {
+			id: 'target-business-card',
+			image: 'https://a.com/card.jpg',
+			width: 0.0889,
+			height: 0.0508,
+			visible: true,
+		},
+	};
+
+	const stored = deserializeSceneDocument(
+		serializeScene(placements, metadata),
+	);
+
+	assert.equal(stored.type, 'marker-horizontal');
+	assert.equal(stored.target.id, 'target-business-card');
+	assert.equal(stored.target.image, 'https://a.com/card.jpg');
+	assert.equal(stored.target.width, 0.0889);
+	assert.equal(stored.target.height, 0.0508);
+	assert.equal(stored.target.orientation, 'horizontal');
+	assert.equal(stored.items[0].y, 0.15);
+
+	const shared = sceneDocumentFromHashParam(
+		sceneToHashParam(placements, metadata),
+	);
+
+	assert.deepEqual(shared, stored);
+});
+
+test('vertical marker scenes normalize orientation and hostile target metadata', () => {
+	assert.equal(normalizeSceneType('marker-vertical'), 'marker-vertical');
+	assert.equal(normalizeSceneType('something-hostile'), 'free');
+
+	const valid = normalizeSceneTarget({
+		id: 'poster',
+		image: '/targets/poster.jpg',
+		width: 0.4572,
+		height: 0.6096,
+	}, 'marker-vertical');
+
+	assert.equal(valid.orientation, 'vertical');
+	assert.equal(valid.image, '/targets/poster.jpg');
+
+	const unsafeImage = normalizeSceneTarget({
+		id: 'poster',
+		image: 'javascript:alert(1)',
+		width: 0.4572,
+		height: 0.6096,
+	}, 'marker-vertical');
+
+	assert.equal('image' in unsafeImage, false);
+
+	assert.equal(normalizeSceneTarget({
+		width: -1,
+		height: 0.5,
+	}, 'marker-horizontal'), null);
+});
+
+test('an empty marker scene still produces a portable scene hash', () => {
+	const hash = sceneToHashParam([], {
+		type: 'marker-horizontal',
+		target: {
+			id: 'card',
+			width: 0.0889,
+			height: 0.0508,
+		},
+	});
+
+	assert.ok(hash.length > 0);
+
+	const restored = sceneDocumentFromHashParam(hash);
+	assert.equal(restored.type, 'marker-horizontal');
+	assert.equal(restored.items.length, 0);
 });
 
 test('a placed arrangement round-trips through the hash exactly', () => {

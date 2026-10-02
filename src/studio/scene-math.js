@@ -167,6 +167,60 @@ export function normalizeGlbUrl(raw) {
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+export const SCENE_TYPES = Object.freeze([
+	'free',
+	'marker-horizontal',
+	'marker-vertical',
+]);
+
+export function normalizeSceneType(raw) {
+	return SCENE_TYPES.includes(raw) ? raw : 'free';
+}
+
+function normalizeTargetImageUrl(raw) {
+	const s = String(raw ?? '').trim();
+	if (!s) return '';
+	if (s.startsWith('/') && !s.startsWith('//')) return s;
+
+	try {
+		const u = new URL(s);
+		return u.protocol === 'https:' ? u.href : '';
+	} catch {
+		return '';
+	}
+}
+
+export function normalizeSceneTarget(raw, sceneType = 'free') {
+	const type = normalizeSceneType(sceneType);
+
+	if (type === 'free' || !raw || typeof raw !== 'object' || Array.isArray(raw)) {
+		return null;
+	}
+
+	const width = Number(raw.width);
+	const height = Number(raw.height);
+
+	if (
+		!Number.isFinite(width)
+		|| !Number.isFinite(height)
+		|| width <= 0
+		|| height <= 0
+	) {
+		return null;
+	}
+
+	const image = normalizeTargetImageUrl(raw.image);
+
+	return {
+		id: String(raw.id || '').trim().slice(0, 80) || 'target',
+		...(image ? { image } : {}),
+		width: clamp(width, 0.01, 20),
+		height: clamp(height, 0.01, 20),
+		orientation: type === 'marker-vertical' ? 'vertical' : 'horizontal',
+		...(raw.visible === false ? { visible: false } : {}),
+	};
+}
+
 /**
  * Serialize live placements for localStorage. Only source + transform survive
  * a refresh: meshes are re-loaded from their URLs on restore.
@@ -175,7 +229,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
  *   yaw: number, scale: number }>} placements
  * @returns {string} JSON payload.
  */
-export function serializeScene(placements) {
+export function serializeScene(placements, metadata = {}) {
 	const items = (Array.isArray(placements) ? placements : [])
 		.slice(0, MAX_PLACEMENTS)
 		.map((p) => ({
@@ -192,8 +246,21 @@ export function serializeScene(placements) {
 				: {}),
 		}))
 		.filter((p) => normalizeGlbUrl(p.src));
-	return JSON.stringify({ v: 1, items });
+
+	const type = normalizeSceneType(metadata?.type);
+	const target = normalizeSceneTarget(metadata?.target, type);
+
+	return JSON.stringify({
+		v: 1,
+
+		// Preserve the exact historical v1 shape for ordinary free scenes.
+		...(type !== 'free' ? { type } : {}),
+		...(target ? { target } : {}),
+
+		items,
+	});
 }
+
 
 /**
  * Parse + validate a persisted scene. Hostile or corrupt input degrades to an
@@ -203,19 +270,27 @@ export function serializeScene(placements) {
  * @returns {Array<{ src: string, title: string, x: number, z: number,
  *   yaw: number, scale: number }>}
  */
-export function deserializeScene(json) {
+export function deserializeSceneDocument(json) {
 	let data;
+
 	try {
 		data = JSON.parse(json ?? 'null');
 	} catch {
-		return [];
+		return { type: 'free', target: null, items: [] };
 	}
-	if (!data || data.v !== 1 || !Array.isArray(data.items)) return [];
+
+	if (!data || data.v !== 1 || !Array.isArray(data.items)) {
+		return { type: 'free', target: null, items: [] };
+	}
+
 	const out = [];
+
 	for (const it of data.items) {
 		if (out.length >= MAX_PLACEMENTS) break;
+
 		const src = normalizeGlbUrl(it?.src);
 		if (!src) continue;
+
 		const x = Number(it.x);
 		const hasY = it.y !== undefined;
 		const y = hasY ? Number(it.y) : 0;
@@ -241,8 +316,21 @@ export function deserializeScene(json) {
 				: {}),
 		});
 	}
-	return out;
+
+	const type = normalizeSceneType(data.type);
+	const target = normalizeSceneTarget(data.target, type);
+
+	return {
+		type,
+		target,
+		items: out,
+	};
 }
+
+export function deserializeScene(json) {
+	return deserializeSceneDocument(json).items;
+}
+
 
 /**
  * Models requested via the URL: every ?src= (repeatable) paired positionally
@@ -292,10 +380,16 @@ function fromBase64Url(s) {
  *   yaw: number, scale: number }>} placements
  * @returns {string} base64url payload for `#s=`, or '' when nothing is shareable.
  */
-export function sceneToHashParam(placements) {
-	const json = serializeScene(placements);
+export function sceneToHashParam(placements, metadata = {}) {
+	const json = serializeScene(placements, metadata);
+
 	try {
-		return JSON.parse(json).items.length ? toBase64Url(json) : '';
+		const doc = JSON.parse(json);
+
+		// Marker scenes remain shareable even before the first 3D model is added.
+		return doc.items.length || doc.type !== 'free'
+			? toBase64Url(json)
+			: '';
 	} catch {
 		return '';
 	}
@@ -308,13 +402,18 @@ export function sceneToHashParam(placements) {
  * @param {string|null|undefined} raw  The value after `#s=`.
  * @returns {ReturnType<typeof deserializeScene>}
  */
-export function sceneFromHashParam(raw) {
-	if (!raw) return [];
+export function sceneDocumentFromHashParam(raw) {
+	if (!raw) return { type: 'free', target: null, items: [] };
+
 	try {
-		return deserializeScene(fromBase64Url(raw));
+		return deserializeSceneDocument(fromBase64Url(raw));
 	} catch {
-		return [];
+		return { type: 'free', target: null, items: [] };
 	}
+}
+
+export function sceneFromHashParam(raw) {
+	return sceneDocumentFromHashParam(raw).items;
 }
 
 /**
@@ -327,10 +426,17 @@ export function sceneFromHashParam(raw) {
  * @param {number} [maxUrlLength]
  * @returns {string}
  */
-export function studioSceneUrl(baseUrl, placements, maxUrlLength = 1500) {
+export function studioSceneUrl(
+	baseUrl,
+	placements,
+	maxUrlLength = 1500,
+	metadata = {},
+) {
 	const base = studioShareUrl(baseUrl, placements);
-	const hash = sceneToHashParam(placements);
+	const hash = sceneToHashParam(placements, metadata);
+
 	if (!hash) return base;
+
 	const full = `${base}#s=${hash}`;
 	return full.length <= maxUrlLength ? full : base;
 }

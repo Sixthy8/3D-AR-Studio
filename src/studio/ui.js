@@ -321,6 +321,150 @@ export function buildUI(host, cfg) {
 		transformGroupActions,
 	]);
 
+	const sceneTypeSelect = el('select', {
+		class: 'ars-scene-type-select',
+		'aria-label': 'Scene type',
+	}, [
+		el('option', { value: 'free', text: 'Free scene' }),
+		el('option', { value: 'marker-horizontal', text: 'Horizontal target' }),
+		el('option', { value: 'marker-vertical', text: 'Vertical target' }),
+	]);
+
+	const sceneTargetWidth = el('input', {
+		type: 'number',
+		class: 'ars-scene-target-input',
+		min: '10',
+		max: '20000',
+		step: '0.1',
+		inputmode: 'decimal',
+		'aria-label': 'Target width in millimeters',
+	});
+
+	const sceneTargetHeight = el('input', {
+		type: 'number',
+		class: 'ars-scene-target-input',
+		min: '10',
+		max: '20000',
+		step: '0.1',
+		inputmode: 'decimal',
+		'aria-label': 'Target height in millimeters',
+	});
+
+	const sceneTargetVisible = el('input', {
+		type: 'checkbox',
+		checked: true,
+		'aria-label': 'Show target preview',
+	});
+
+	const sceneTargetFile = el('input', {
+		type: 'file',
+		accept: 'image/png,image/jpeg',
+		class: 'ars-scene-target-file',
+		'aria-label': 'Choose target image',
+	});
+
+	const sceneTargetChoose = el('button', {
+		type: 'button',
+		class: 'ars-scene-target-image-btn',
+		text: 'Choose Image',
+	});
+
+	const sceneTargetRemove = el('button', {
+		type: 'button',
+		class: 'ars-scene-target-image-btn',
+		text: 'Remove',
+		hidden: true,
+	});
+
+	const sceneTargetImageName = el('div', {
+		class: 'ars-scene-target-image-name',
+		text: 'No target image selected',
+	});
+
+	const sceneTargetImageActions = el('div', {
+		class: 'ars-scene-target-image-actions',
+	}, [
+		sceneTargetChoose,
+		sceneTargetRemove,
+	]);
+
+	const sceneTargetImage = el('div', {
+		class: 'ars-scene-target-image',
+	}, [
+		el('div', {
+			class: 'ars-scene-target-image-label',
+			text: 'Target image',
+		}),
+		sceneTargetFile,
+		sceneTargetImageActions,
+		sceneTargetImageName,
+	]);
+
+	const sceneTargetOrientation = el('div', {
+		class: 'ars-scene-target-orientation',
+		text: 'Horizontal target · build above',
+	});
+
+	const sceneFocusTarget = el('button', {
+		type: 'button',
+		class: 'ars-scene-view-action',
+		text: 'Focus Target',
+	});
+
+	const sceneResetView = el('button', {
+		type: 'button',
+		class: 'ars-scene-view-action',
+		text: 'Reset View',
+	});
+
+	const sceneViewActions = el('div', {
+		class: 'ars-scene-view-actions',
+	}, [
+		sceneFocusTarget,
+		sceneResetView,
+	]);
+
+	const sceneTargetSettings = el('div', {
+		class: 'ars-scene-target-settings',
+		hidden: true,
+	}, [
+		sceneTargetOrientation,
+		sceneTargetImage,
+		el('div', { class: 'ars-scene-target-dimensions' }, [
+			el('label', {}, [
+				el('span', { text: 'Width (mm)' }),
+				sceneTargetWidth,
+			]),
+			el('label', {}, [
+				el('span', { text: 'Height (mm)' }),
+				sceneTargetHeight,
+			]),
+		]),
+		el('label', { class: 'ars-scene-target-visible' }, [
+			sceneTargetVisible,
+			el('span', { text: 'Show target preview' }),
+		]),
+		sceneViewActions,
+	]);
+
+	const sceneSetup = el('section', {
+		class: 'ars-scene-setup',
+		'aria-label': 'Scene setup',
+	}, [
+		el('label', { class: 'ars-scene-type-field' }, [
+			el('span', { text: 'Scene type' }),
+			sceneTypeSelect,
+		]),
+		sceneTargetSettings,
+	]);
+
+	const sceneControls = el('div', {
+		class: 'ars-scene-controls',
+	}, [
+		sceneSetup,
+		transformInspector,
+	]);
+
 	const sceneList = el('div', {
 		class: 'ars-scene-list',
 		role: 'list',
@@ -346,7 +490,7 @@ export function buildUI(host, cfg) {
 			el('span', { class: 'ars-spacer' }),
 			sceneClose,
 		]),
-		transformInspector,
+		sceneControls,
 		sceneList,
 	]);
 
@@ -477,7 +621,12 @@ export function buildUI(host, cfg) {
 		forgeForm: canGenerate ? forgeForm : null, forgeInput: canGenerate ? forgeInput : null, forgeGo: canGenerate ? forgeGo : null,
 		empty, emptyCamera, emptyAdd, emptyForge,
 		selbar, selName,
-		scenePanel, sceneList, sceneClose,
+		scenePanel, sceneList, sceneClose, sceneControls,
+		sceneSetup, sceneTypeSelect, sceneTargetSettings,
+		sceneTargetWidth, sceneTargetHeight, sceneTargetVisible,
+		sceneTargetFile, sceneTargetChoose, sceneTargetRemove,
+		sceneTargetImageName, sceneTargetOrientation,
+		sceneFocusTarget, sceneResetView,
 		transformInspector, transformTitle, transformModes, transformFields,
 		transformSnapToggle, transformSnapSettings, transformSnapFields,
 		transformGround, transformReset,

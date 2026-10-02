@@ -234,9 +234,185 @@ export function studioStyles() {
 	font-size: 11.5px;
 	color: var(--ars-ink-faint);
 }
-.ars-transform-inspector {
+.ars-scene-controls {
+	flex: 0 1 auto;
+	max-height: 54%;
+	overflow-y: auto;
+	overflow-x: hidden;
+	-webkit-overflow-scrolling: touch;
+	overscroll-behavior: contain;
+	border-bottom: 1px solid var(--ars-line);
+}
+
+.ars-scene-controls::-webkit-scrollbar {
+	width: 7px;
+}
+
+.ars-scene-controls::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.15);
+	border-radius: 999px;
+}
+
+.ars-scene-setup {
 	padding: 12px 14px;
 	border-bottom: 1px solid var(--ars-line);
+	background: rgba(255, 255, 255, 0.018);
+}
+
+.ars-scene-type-field {
+	display: grid;
+	gap: 6px;
+	font-size: 10px;
+	font-weight: 750;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--ars-ink-faint);
+}
+
+.ars-scene-type-select,
+.ars-scene-target-input {
+	width: 100%;
+	box-sizing: border-box;
+	border: 1px solid var(--ars-line);
+	border-radius: 9px;
+	background: rgba(0, 0, 0, 0.24);
+	color: var(--ars-ink);
+	font: inherit;
+	font-size: 12px;
+	font-weight: 650;
+	padding: 8px 9px;
+	outline: none;
+}
+
+.ars-scene-type-select:focus,
+.ars-scene-target-input:focus {
+	border-color: var(--ars-accent);
+}
+
+.ars-scene-target-settings {
+	margin-top: 10px;
+	padding-top: 10px;
+	border-top: 1px solid var(--ars-line);
+}
+
+.ars-scene-target-image {
+	margin: 9px 0 11px;
+	padding: 9px;
+	border: 1px solid var(--ars-line);
+	border-radius: 9px;
+	background: rgba(0, 0, 0, 0.14);
+}
+
+.ars-scene-target-file {
+	display: none;
+}
+
+.ars-scene-target-image-label {
+	margin-bottom: 7px;
+	font-size: 9.5px;
+	font-weight: 750;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--ars-ink-faint);
+}
+
+.ars-scene-target-image-actions {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: 7px;
+}
+
+.ars-scene-target-image-btn {
+	appearance: none;
+	border: 1px solid var(--ars-line);
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.055);
+	color: var(--ars-ink-dim);
+	font: inherit;
+	font-size: 10.5px;
+	font-weight: 700;
+	padding: 7px 9px;
+	cursor: pointer;
+}
+
+.ars-scene-target-image-btn:hover {
+	background: rgba(255, 255, 255, 0.11);
+	color: var(--ars-ink);
+}
+
+.ars-scene-target-image-name {
+	margin-top: 7px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 10px;
+	color: var(--ars-ink-faint);
+}
+
+.ars-scene-target-orientation {
+	margin-bottom: 9px;
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--ars-accent-ink);
+}
+
+.ars-scene-target-dimensions {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 7px;
+}
+
+.ars-scene-target-dimensions label {
+	display: grid;
+	gap: 4px;
+	font-size: 9.5px;
+	font-weight: 650;
+	color: var(--ars-ink-faint);
+}
+
+.ars-scene-target-visible {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	margin-top: 10px;
+	font-size: 11px;
+	font-weight: 650;
+	color: var(--ars-ink-dim);
+	cursor: pointer;
+}
+
+.ars-scene-target-visible input {
+	accent-color: var(--ars-accent);
+}
+
+.ars-scene-view-actions {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 7px;
+	margin-top: 10px;
+}
+
+.ars-scene-view-action {
+	appearance: none;
+	border: 1px solid var(--ars-line);
+	border-radius: 9px;
+	background: rgba(255, 255, 255, 0.055);
+	color: var(--ars-ink-dim);
+	font: inherit;
+	font-size: 11px;
+	font-weight: 700;
+	padding: 8px 9px;
+	cursor: pointer;
+}
+
+.ars-scene-view-action:hover {
+	background: rgba(255, 255, 255, 0.11);
+	border-color: rgba(255, 255, 255, 0.24);
+	color: var(--ars-ink);
+}
+
+.ars-transform-inspector {
+	padding: 12px 14px;
 	background: rgba(255, 255, 255, 0.025);
 }
 .ars-transform-inspector:has(.ars-transform-title:not(:empty)) {
@@ -425,7 +601,8 @@ export function studioStyles() {
 }
 
 .ars-scene-list {
-	flex: 1 1 auto;
+	flex: 1 1 46%;
+	min-height: 130px;
 	overflow-y: auto;
 	padding: 10px;
 	display: flex;
@@ -541,6 +718,14 @@ export function studioStyles() {
 }
 
 @media (max-width: 640px) {
+	.ars-scene-controls {
+		max-height: 48%;
+	}
+
+	.ars-scene-list {
+		min-height: 150px;
+	}
+
 	.ars-scene-panel {
 		left: 10px;
 		right: 10px;
