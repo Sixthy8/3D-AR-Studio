@@ -395,6 +395,17 @@ export class ArStudio {
 		bind(u.transformGround, 'click', () => this._snapSelectedToGround());
 		bind(u.transformReset, 'click', () => this._resetSelectedTransform());
 
+		bind(u.transformGroupActions, 'click', (e) => {
+			const btn = e.target.closest('[data-group-action]');
+			if (!btn) return;
+
+			if (btn.dataset.groupAction === 'visibility') {
+				this._toggleActiveGroupVisibility();
+			} else if (btn.dataset.groupAction === 'ungroup') {
+				this._ungroupRuntimeSelection();
+			}
+		});
+
 		this._applyTransformSnapSettings();
 
 		this.transformControls.addEventListener('mouseDown', () => {
@@ -569,6 +580,7 @@ export class ArStudio {
 					yaw: p.yaw,
 					scale: this._logicalScale(p),
 					visible: p.visible !== false,
+					group: p.groupId || undefined,
 				})),
 			));
 		} catch {
@@ -583,7 +595,15 @@ export class ArStudio {
 	_select(p) {
 		this._dropRuntimeGroup();
 		this._selection.clear();
-		if (p) this._selection.add(p.id);
+
+		if (!p) {
+			this._syncSelectionState();
+			return;
+		}
+
+		if (p.groupId && this._activatePersistentGroup(p.groupId)) return;
+
+		this._selection.add(p.id);
 		this._syncSelectionState();
 	}
 
@@ -592,8 +612,16 @@ export class ArStudio {
 
 		this._dropRuntimeGroup();
 
-		if (this._selection.has(p.id)) this._selection.delete(p.id);
-		else this._selection.add(p.id);
+		const members = p.groupId
+			? this._groupMembers(p.groupId)
+			: [p];
+
+		const allSelected = members.every((item) => this._selection.has(item.id));
+
+		for (const item of members) {
+			if (allSelected) this._selection.delete(item.id);
+			else this._selection.add(item.id);
+		}
 
 		this._syncSelectionState();
 	}
@@ -777,6 +805,7 @@ export class ArStudio {
 
 	async _addModel({ src, title = '', poster = '' } = {}, {
 		x = null, y = 0, z = null, yaw = null, scale = null, visible = true, announce = true, persist = true,
+		groupId = null,
 		remote = false, netId = null, ownerId = null,
 	} = {}) {
 		const url = normalizeGlbUrl(src);
@@ -841,6 +870,9 @@ export class ArStudio {
 			baseRadius: tpl.radius,
 			height: tpl.height || 0,
 			visible: visible !== false,
+			groupId: typeof groupId === 'string' && /^g-[A-Za-z0-9_-]{4,64}$/.test(groupId)
+				? groupId
+				: null,
 			spawnT: this.reducedMotion ? 1 : 0,
 			netId: netId || null,
 			ownerId: remote ? ownerId : null,
@@ -919,6 +951,7 @@ export class ArStudio {
 		if (this.ui.arModal && !this.ui.arModal.hidden) {
 			this._showArTarget(this._arTarget === p ? this._arDefaultTarget() : this._arTarget);
 		}
+		this._normalizePersistentGroups();
 		this._updateCount();
 		if (persist) this._saveScene();
 		this._emit('remove', { src: p.src, title: p.title });
@@ -936,11 +969,120 @@ export class ArStudio {
 				for (const it of items) {
 					await this._addModel({ src: it.src, title: it.title }, {
 						x: it.x, y: it.y ?? 0, z: it.z, yaw: it.yaw, scale: it.scale,
-						visible: it.visible !== false, announce: false,
+						visible: it.visible !== false,
+						groupId: it.group || null,
+						announce: false,
 					});
 				}
 			},
 		});
+	}
+
+	_groupDisplayLabels() {
+		const labels = new Map();
+		let index = 1;
+
+		for (const p of this.placements) {
+			if (!p.groupId || labels.has(p.groupId)) continue;
+			labels.set(p.groupId, `Group ${index++}`);
+		}
+
+		return labels;
+	}
+
+	_groupDisplayLabel(groupId) {
+		return this._groupDisplayLabels().get(groupId) || 'Group';
+	}
+
+	_groupMembers(groupId) {
+		if (!groupId) return [];
+		return this.placements.filter((p) => p.groupId === groupId);
+	}
+
+	_newGroupId() {
+		const token = crypto?.randomUUID?.()
+			? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+			: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+		return `g-${token}`;
+	}
+
+	_normalizePersistentGroups() {
+		const counts = new Map();
+
+		for (const p of this.placements) {
+			if (!p.groupId) continue;
+			counts.set(p.groupId, (counts.get(p.groupId) || 0) + 1);
+		}
+
+		for (const p of this.placements) {
+			if (p.groupId && (counts.get(p.groupId) || 0) < 2) {
+				p.groupId = null;
+			}
+		}
+	}
+
+	_activatePersistentGroup(groupId, { announce = false } = {}) {
+		const items = this._groupMembers(groupId)
+			.filter((p) => this._isMine(p));
+
+		if (items.length < 2) return false;
+
+		this._dropRuntimeGroup();
+
+		this._selection.clear();
+		for (const p of items) this._selection.add(p.id);
+
+		const center = items.reduce(
+			(acc, p) => {
+				acc.x += p.group.position.x;
+				acc.y += p.group.position.y;
+				acc.z += p.group.position.z;
+				return acc;
+			},
+			{ x: 0, y: 0, z: 0 },
+		);
+
+		center.x /= items.length;
+		center.y /= items.length;
+		center.z /= items.length;
+
+		const pivot = new Group();
+		pivot.name = `RuntimeSelectionGroup_${groupId}`;
+		pivot.position.set(center.x, center.y, center.z);
+		pivot.rotation.set(0, 0, 0);
+		pivot.scale.setScalar(1);
+
+		const snapshots = new Map();
+
+		for (const p of items) {
+			snapshots.set(p.id, {
+				offsetX: p.group.position.x - center.x,
+				offsetY: p.group.position.y - center.y,
+				offsetZ: p.group.position.z - center.z,
+				yaw: p.yaw,
+				scale: this._logicalScale(p),
+			});
+		}
+
+		this.scene.add(pivot);
+
+		this._runtimeGroup = {
+			groupId,
+			memberIds: new Set(items.map((p) => p.id)),
+			pivot,
+			snapshots,
+		};
+
+		this.selected = null;
+		this.selRing.visible = false;
+		this._syncSelectionState();
+
+		if (announce) {
+			this._setStatus(`Group · ${items.length} models`);
+		}
+
+		return true;
 	}
 
 	// ── Runtime grouping ──────────────────────────────────────────────────────
@@ -1021,7 +1163,12 @@ export class ArStudio {
 
 		this.scene.add(pivot);
 
+		const groupId = this._newGroupId();
+
+		for (const p of items) p.groupId = groupId;
+
 		this._runtimeGroup = {
+			groupId,
 			memberIds: new Set(items.map((p) => p.id)),
 			pivot,
 			snapshots,
@@ -1030,6 +1177,8 @@ export class ArStudio {
 		this.selected = null;
 		this.selRing.visible = false;
 		this._syncSelectionState();
+
+		this._saveScene();
 
 		this._setStatus(
 			`Grouped ${items.length} models. Move, rotate or scale them together.`,
@@ -1045,7 +1194,14 @@ export class ArStudio {
 		if (!g) return;
 
 		const count = g.memberIds.size;
+
+		for (const id of g.memberIds) {
+			const p = this.placements.find((item) => item.id === id);
+			if (p) p.groupId = null;
+		}
+
 		this._dropRuntimeGroup();
+		this._saveScene();
 		this._syncSelectionState();
 
 		this._setStatus(`Ungrouped ${count} models.`);
@@ -1354,19 +1510,159 @@ export class ArStudio {
 		this._syncTransformInspector();
 	}
 
+	_toggleActiveGroupVisibility() {
+		const group = this._runtimeGroupMatchesSelection()
+			? this._runtimeGroup
+			: null;
+
+		if (!group) return;
+
+		const items = this._selectedPlacements()
+			.filter((p) => this._isMine(p));
+
+		if (!items.length) return;
+
+		// If every member is hidden, Show Group.
+		// Any visible/mixed state resolves to Hide Group.
+		const shouldShow = items.every((p) => p.visible === false);
+
+		for (const p of items) {
+			p.visible = shouldShow;
+			p.group.visible = shouldShow;
+
+			if (p.shadow) {
+				p.shadow.visible = shouldShow && !this.xrSession;
+			}
+
+			this._emit('visibility', {
+				placement: publicPlacement(p, this),
+				visible: p.visible,
+			});
+		}
+
+		if (shouldShow) {
+			this._attachRuntimeGroupGizmo();
+			this._setStatus(`Showed ${items.length} grouped models.`);
+		} else {
+			// Keep the group selected so the inspector remains available to restore it.
+			this._detachTransformGizmo();
+			this._setStatus(`Hid ${items.length} grouped models.`);
+		}
+
+		this._saveScene();
+		this._syncTransformInspector();
+		this._renderSceneTree();
+	}
+
 	_syncTransformInspector() {
-		const panel = this.ui.transformInspector;
-		const p = this.selected;
+		const {
+			transformInspector: panel,
+			transformTitle,
+			transformFields,
+			transformGround,
+			transformReset,
+			transformSnapSettings,
+			transformModes,
+			transformGroupActions,
+			groupVisibility,
+		} = this.ui;
 
 		if (!panel) return;
 
-		const usable = !!p && p.visible !== false && this._isMine(p);
-		panel.hidden = !usable;
+		const p = this.selected;
+		const group = this._runtimeGroupMatchesSelection()
+			? this._runtimeGroup
+			: null;
 
-		if (!usable) return;
+		const groupItems = group
+			? this._selectedPlacements()
+			: [];
+
+		const groupUsable = !!group
+			&& groupItems.length > 1
+			&& groupItems.every((item) => this._isMine(item));
+
+		const groupAllHidden = groupUsable
+			&& groupItems.every((item) => item.visible === false);
+
+		const groupAllVisible = groupUsable
+			&& groupItems.every((item) => item.visible !== false);
+
+		const singleUsable = !!p
+			&& p.visible !== false
+			&& this._isMine(p);
+
+		panel.hidden = !(groupUsable || singleUsable);
+
+		if (panel.hidden) return;
+
+		if (groupUsable) {
+			const label = group.groupId
+				? this._groupDisplayLabel(group.groupId)
+				: 'Group';
+
+			if (transformTitle) {
+				transformTitle.textContent =
+					`${label} · ${groupItems.length} models`;
+			}
+
+			// Groups expose shared transform controls plus group-level actions.
+			// Per-child numeric fields remain single-model editing tools.
+			if (transformFields) transformFields.hidden = true;
+			if (transformGround) transformGround.hidden = true;
+			if (transformReset) transformReset.hidden = true;
+			if (transformGroupActions) transformGroupActions.hidden = false;
+
+			// A fully hidden group cannot meaningfully display a transform gizmo.
+			// Keep only its recovery/actions row visible.
+			if (transformModes) transformModes.hidden = groupAllHidden;
+			if (transformSnapSettings) transformSnapSettings.hidden = groupAllHidden;
+
+			if (groupVisibility) {
+				groupVisibility.textContent = groupAllHidden
+					? 'Show Group'
+					: groupAllVisible
+						? 'Hide Group'
+						: 'Show All';
+
+				groupVisibility.setAttribute(
+					'aria-label',
+					groupAllHidden
+						? 'Show every model in this group'
+						: groupAllVisible
+							? 'Hide every model in this group'
+							: 'Show every model in this group',
+				);
+			}
+
+			if (!groupAllHidden) {
+				for (
+					const btn of
+					this.ui.transformModes?.querySelectorAll('[data-transform-mode]') || []
+				) {
+					const active = btn.dataset.transformMode === this._transformMode;
+					btn.classList.toggle('is-active', active);
+					btn.setAttribute('aria-pressed', String(active));
+				}
+
+				this._applyTransformSnapSettings();
+			}
+
+			return;
+		}
+
+		if (transformTitle) transformTitle.textContent = 'Transform';
+		if (transformFields) transformFields.hidden = false;
+		if (transformGround) transformGround.hidden = false;
+		if (transformReset) transformReset.hidden = false;
+		if (transformModes) transformModes.hidden = false;
+		if (transformSnapSettings) transformSnapSettings.hidden = false;
+		if (transformGroupActions) transformGroupActions.hidden = true;
 
 		const set = (name, value) => {
-			const input = this.ui.transformFields?.querySelector(`[data-transform-field="${name}"]`);
+			const input = this.ui.transformFields?.querySelector(
+				`[data-transform-field="${name}"]`,
+			);
 			if (input && document.activeElement !== input) input.value = value;
 		};
 
@@ -1376,13 +1672,17 @@ export class ArStudio {
 		set('yaw', (p.yaw * 180 / Math.PI).toFixed(1));
 		set('scale', this._logicalScale(p).toFixed(3));
 
-		if (this.ui.transformGround) {
-			this.ui.transformGround.disabled = Math.abs(p.group.position.y) < 0.001;
+		if (transformGround) {
+			transformGround.disabled = Math.abs(p.group.position.y) < 0.001;
 		}
 
-		for (const btn of this.ui.transformModes?.querySelectorAll('[data-transform-mode]') || []) {
-			btn.classList.toggle('is-active', btn.dataset.transformMode === this._transformMode);
-			btn.setAttribute('aria-pressed', String(btn.dataset.transformMode === this._transformMode));
+		for (
+			const btn of
+			this.ui.transformModes?.querySelectorAll('[data-transform-mode]') || []
+		) {
+			const active = btn.dataset.transformMode === this._transformMode;
+			btn.classList.toggle('is-active', active);
+			btn.setAttribute('aria-pressed', String(active));
 		}
 	}
 
@@ -1526,18 +1826,37 @@ export class ArStudio {
 			return;
 		}
 
+		const groupLabels = this._groupDisplayLabels();
+
 		for (const p of this.placements) {
 			const mine = this._isMine(p);
 			const selected = this._selection.has(p.id);
 			const visible = p.visible !== false;
+			const groupLabel = p.groupId
+				? groupLabels.get(p.groupId)
+				: null;
+
+			const selectChildren = [
+				el('span', {
+					class: 'ars-scene-model-name',
+					text: p.title || 'Model',
+				}),
+			];
+
+			if (groupLabel) {
+				selectChildren.push(el('span', {
+					class: 'ars-scene-group-badge',
+					text: groupLabel,
+					'aria-label': `${groupLabel} member`,
+				}));
+			}
 
 			const select = el('button', {
 				type: 'button',
 				class: 'ars-scene-select',
 				'data-act': 'select',
 				'aria-pressed': selected ? 'true' : 'false',
-				text: p.title || 'Model',
-			});
+			}, selectChildren);
 
 			const actions = el('div', {
 				class: 'ars-scene-actions',
@@ -1573,7 +1892,10 @@ export class ArStudio {
 			]);
 
 			const row = el('div', {
-				class: `ars-scene-row${selected ? ' is-selected' : ''}${visible ? '' : ' is-hidden'}`,
+				class:
+					`ars-scene-row${selected ? ' is-selected' : ''}` +
+					`${visible ? '' : ' is-hidden'}` +
+					`${groupLabel ? ' is-group-member' : ''}`,
 				role: 'listitem',
 				'data-placement-id': p.id,
 			}, [
@@ -1869,7 +2191,10 @@ export class ArStudio {
 		for (const it of items) {
 			await this._addModel({ src: it.src, title: it.title }, {
 				x: it.x, y: it.y ?? 0, z: it.z, yaw: it.yaw, scale: it.scale,
-				visible: it.visible !== false, announce: false, persist: false,
+				visible: it.visible !== false,
+				groupId: it.group || null,
+				announce: false,
+				persist: false,
 			});
 		}
 		// Deep-linked models land in front of the camera, skipping any already
@@ -2254,6 +2579,13 @@ export class ArStudio {
 
 	/** Two fingers: pinch resizes, twist rotates: on the selected (or last) model. */
 	_gestureTarget() {
+		// Multi-select and groups have their own transform workflow. Falling back
+		// to the last placement here would let a two-finger gesture silently edit
+		// an unrelated model while several models appear selected.
+		if (this._selection?.size > 1 || this._runtimeGroupMatchesSelection()) {
+			return null;
+		}
+
 		const t = this.selected ?? this.placements[this.placements.length - 1] ?? null;
 		return t && this._isMine(t) ? t : null;
 	}
@@ -3905,10 +4237,12 @@ export class ArStudio {
 			src: p.src,
 			title: p.title,
 			x: p.group.position.x,
+			y: p.group.position.y,
 			z: p.group.position.z,
 			yaw: p.yaw,
 			scale: this._logicalScale(p),
 			visible: p.visible !== false,
+			...(p.groupId ? { group: p.groupId } : {}),
 		}));
 	}
 
@@ -3918,7 +4252,10 @@ export class ArStudio {
 		for (const it of Array.isArray(items) ? items : []) {
 			await this._addModel({ src: it.src, title: it.title }, {
 				x: it.x, y: it.y ?? 0, z: it.z, yaw: it.yaw, scale: it.scale,
-				visible: it.visible !== false, announce: false, persist: false,
+				visible: it.visible !== false,
+				groupId: it.group || null,
+				announce: false,
+				persist: false,
 			});
 		}
 		this._saveScene();
@@ -4104,6 +4441,7 @@ function publicPlacement(p, studio) {
 		yaw: p.yaw,
 		scale: studio._logicalScale(p),
 		visible: p.visible !== false,
+		...(p.groupId ? { group: p.groupId } : {}),
 		mine: studio._isMine(p),
 	};
 }

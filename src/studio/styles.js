@@ -239,6 +239,10 @@ export function studioStyles() {
 	border-bottom: 1px solid var(--ars-line);
 	background: rgba(255, 255, 255, 0.025);
 }
+.ars-transform-inspector:has(.ars-transform-title:not(:empty)) {
+	position: relative;
+}
+
 .ars-transform-title {
 	font-size: 11px;
 	font-weight: 750;
@@ -388,6 +392,38 @@ export function studioStyles() {
 	cursor: default;
 }
 
+.ars-transform-group-actions {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 7px;
+	margin-top: 10px;
+	padding-top: 10px;
+	border-top: 1px solid var(--ars-line);
+}
+
+.ars-transform-group-action {
+	appearance: none;
+	border: 1px solid var(--ars-line);
+	border-radius: 9px;
+	background: rgba(255, 255, 255, 0.045);
+	color: var(--ars-ink-dim);
+	font: inherit;
+	font-size: 11px;
+	font-weight: 700;
+	padding: 8px;
+	cursor: pointer;
+}
+
+.ars-transform-group-action:hover {
+	background: rgba(255, 255, 255, 0.10);
+	border-color: rgba(255, 255, 255, 0.24);
+	color: var(--ars-ink);
+}
+
+.ars-transform-group-action[data-group-action="visibility"] {
+	color: var(--ars-accent-ink);
+}
+
 .ars-scene-list {
 	flex: 1 1 auto;
 	overflow-y: auto;
@@ -434,6 +470,38 @@ export function studioStyles() {
 }
 .ars-scene-select[aria-pressed="true"] {
 	color: var(--ars-accent-ink);
+}
+
+.ars-scene-row.is-group-member {
+	border-left-color: color-mix(in srgb, var(--ars-accent) 42%, var(--ars-line));
+}
+
+.ars-scene-select {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.ars-scene-model-name {
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ars-scene-group-badge {
+	flex: 0 0 auto;
+	font-size: 9px;
+	font-weight: 800;
+	line-height: 1;
+	letter-spacing: 0.03em;
+	text-transform: uppercase;
+	color: var(--ars-accent-ink);
+	background: color-mix(in srgb, var(--ars-accent) 16%, transparent);
+	border: 1px solid color-mix(in srgb, var(--ars-accent) 38%, transparent);
+	border-radius: 999px;
+	padding: 4px 6px;
 }
 .ars-scene-actions {
 	display: flex;

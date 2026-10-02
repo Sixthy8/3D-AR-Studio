@@ -280,17 +280,45 @@ export function buildUI(host, cfg) {
 		text: 'Reset transform',
 	});
 
+	const groupVisibility = el('button', {
+		type: 'button',
+		class: 'ars-transform-group-action',
+		'data-group-action': 'visibility',
+		text: 'Hide Group',
+	});
+
+	const groupUngroup = el('button', {
+		type: 'button',
+		class: 'ars-transform-group-action',
+		'data-group-action': 'ungroup',
+		text: 'Ungroup',
+	});
+
+	const transformGroupActions = el('div', {
+		class: 'ars-transform-group-actions',
+		hidden: true,
+	}, [
+		groupVisibility,
+		groupUngroup,
+	]);
+
+	const transformTitle = el('div', {
+		class: 'ars-transform-title',
+		text: 'Transform',
+	});
+
 	const transformInspector = el('section', {
 		class: 'ars-transform-inspector',
 		hidden: true,
-		'aria-label': 'Transform selected model',
+		'aria-label': 'Transform selected model or group',
 	}, [
-		el('div', { class: 'ars-transform-title', text: 'Transform' }),
+		transformTitle,
 		transformModes,
 		transformSnapSettings,
 		transformFields,
 		transformGround,
 		transformReset,
+		transformGroupActions,
 	]);
 
 	const sceneList = el('div', {
@@ -450,9 +478,10 @@ export function buildUI(host, cfg) {
 		empty, emptyCamera, emptyAdd, emptyForge,
 		selbar, selName,
 		scenePanel, sceneList, sceneClose,
-		transformInspector, transformModes, transformFields,
+		transformInspector, transformTitle, transformModes, transformFields,
 		transformSnapToggle, transformSnapSettings, transformSnapFields,
 		transformGround, transformReset,
+		transformGroupActions, groupVisibility, groupUngroup,
 		tray, trayTabs, trayBody, trayClose,
 		qrModal, qrBox, qrLink, qrClose,
 		arModal, arThumb, arName, arPicker, arHint, arStatus, arGo, arScene, arXr, arQr, arClose,

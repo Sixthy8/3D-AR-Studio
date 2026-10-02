@@ -187,6 +187,9 @@ export function serializeScene(placements) {
 			yaw: Number(p.yaw) || 0,
 			scale: clamp(Number(p.scale) || 1, SCALE_MIN, SCALE_MAX),
 			...(p.visible === false ? { visible: false } : {}),
+			...(typeof p.group === 'string' && /^g-[A-Za-z0-9_-]{4,64}$/.test(p.group)
+				? { group: p.group }
+				: {}),
 		}))
 		.filter((p) => normalizeGlbUrl(p.src));
 	return JSON.stringify({ v: 1, items });
@@ -233,6 +236,9 @@ export function deserializeScene(json) {
 			yaw: Number.isFinite(Number(it.yaw)) ? Number(it.yaw) : 0,
 			scale: clamp(Number(it.scale) || 1, SCALE_MIN, SCALE_MAX),
 			...(it.visible === false ? { visible: false } : {}),
+			...(typeof it.group === 'string' && /^g-[A-Za-z0-9_-]{4,64}$/.test(it.group)
+				? { group: it.group }
+				: {}),
 		});
 	}
 	return out;
