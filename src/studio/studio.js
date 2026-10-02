@@ -200,7 +200,11 @@ export class ArStudio {
 	_initState() {
 		/** @type {Array<object>} */
 		this.placements = [];
+
+		// `selected` remains the single-object transform target.
+		// `_selection` is editor-only and may contain zero, one, or many placement IDs.
 		this.selected = null;
+		this._selection = new Set();
 		this.arActive = false;
 		this.mediaStream = null;
 		this.arTransitioning = false;
@@ -558,32 +562,97 @@ export class ArStudio {
 		}
 	}
 
+	_selectedPlacements() {
+		return this.placements.filter((p) => this._selection.has(p.id));
+	}
+
 	_select(p) {
-		this.selected = p;
+		this._selection.clear();
+		if (p) this._selection.add(p.id);
+		this._syncSelectionState();
+	}
+
+	_toggleSelection(p) {
+		if (!p) return;
+
+		if (this._selection.has(p.id)) this._selection.delete(p.id);
+		else this._selection.add(p.id);
+
+		this._syncSelectionState();
+	}
+
+	_syncSelectionState() {
+		// Drop stale IDs left behind by deletion or scene replacement.
+		const liveIds = new Set(this.placements.map((p) => p.id));
+		for (const id of [...this._selection]) {
+			if (!liveIds.has(id)) this._selection.delete(id);
+		}
+
+		const selectedItems = this._selectedPlacements();
+		const single = selectedItems.length === 1 ? selectedItems[0] : null;
+
+		this.selected = single;
+
 		const { selbar, selName } = this.ui;
 		if (!selbar) return;
-		if (!p) {
+
+		if (!selectedItems.length) {
 			selbar.hidden = true;
 			this.selRing.visible = false;
 			this._detachTransformGizmo();
 			this._syncTransformInspector();
 			this._renderSceneTree();
-			this._emit('select', { placement: null });
+			this._emit('select', { placement: null, placements: [] });
 			return;
 		}
+
 		selbar.hidden = false;
-		if (selName) selName.textContent = p.title || 'Model';
-		this.selRing.visible = p.visible !== false && !this.xrSession;
-		if (p.visible !== false) {
-			this._positionSelRing();
-			this._warmQuickLook();
-			this._attachTransformGizmo(p);
-		} else {
-			this._detachTransformGizmo();
+
+		const multi = selectedItems.length > 1;
+
+		if (selName) {
+			selName.textContent = multi
+				? `${selectedItems.length} models selected`
+				: single.title || 'Model';
 		}
-		this._syncTransformInspector();
+
+		const rotateBtn = selbar.querySelector('[data-act="rotate"]');
+		if (rotateBtn) rotateBtn.hidden = multi;
+
+		const visibilityBtn = selbar.querySelector('[data-act="visibility"]');
+		if (visibilityBtn) {
+			const allHidden = selectedItems.every((p) => p.visible === false);
+			visibilityBtn.textContent = allHidden ? 'Show' : 'Hide';
+			visibilityBtn.setAttribute(
+				'aria-label',
+				allHidden ? 'Show selected models' : 'Hide selected models',
+			);
+		}
+
+		if (multi) {
+			this.selRing.visible = false;
+			this._detachTransformGizmo();
+			this._syncTransformInspector();
+		} else {
+			this.selRing.visible = single.visible !== false && !this.xrSession;
+
+			if (single.visible !== false) {
+				this._positionSelRing();
+				this._warmQuickLook();
+				this._attachTransformGizmo(single);
+			} else {
+				this._detachTransformGizmo();
+			}
+
+			this._syncTransformInspector();
+		}
+
 		this._renderSceneTree();
-		this._emit('select', { placement: publicPlacement(p, this) });
+
+		this._emit('select', {
+			placement: single ? publicPlacement(single, this) : null,
+			placements: selectedItems.map((p) => publicPlacement(p, this)),
+		});
 	}
 
 	_positionSelRing() {
@@ -799,7 +868,14 @@ export class ArStudio {
 		}
 		// Geometry and materials belong to the shared template: other copies still
 		// use them, so only the per-placement shadow above is disposed.
-		if (this.selected === p) this._select(this.placements[this.placements.length - 1] ?? null);
+		const wasPrimary = this.selected === p;
+		const wasSelected = this._selection.delete(p.id);
+
+		if (wasPrimary && !this._selection.size) {
+			this._select(this.placements[this.placements.length - 1] ?? null);
+		} else if (wasSelected) {
+			this._syncSelectionState();
+		}
 		releaseQuickLook(this._arCacheKey(p));
 		this._arKeys.delete(this._arCacheKey(p));
 		// The sheet may be listing a model that no longer exists.
@@ -1174,7 +1250,7 @@ export class ArStudio {
 
 		for (const p of this.placements) {
 			const mine = this._isMine(p);
-			const selected = this.selected === p;
+			const selected = this._selection.has(p.id);
 			const visible = p.visible !== false;
 
 			const select = el('button', {
@@ -1245,7 +1321,8 @@ export class ArStudio {
 		const act = btn.dataset.act;
 
 		if (act === 'select') {
-			this._select(p);
+			if (e.shiftKey || e.ctrlKey || e.metaKey) this._toggleSelection(p);
+			else this._select(p);
 			return;
 		}
 
@@ -1294,8 +1371,9 @@ export class ArStudio {
 			p.group.visible = p.visible;
 			if (p.shadow) p.shadow.visible = p.visible && !this.xrSession;
 
-			if (!p.visible && this.selected === p) {
-				this._select(null);
+			if (!p.visible && this._selection.has(p.id)) {
+				this._selection.delete(p.id);
+				this._syncSelectionState();
 			} else {
 				this._renderSceneTree();
 			}
@@ -1336,31 +1414,150 @@ export class ArStudio {
 		}
 	}
 
-	_onSelbarClick(e) {
+	async _onSelbarClick(e) {
 		const btn = e.target.closest('[data-act]');
-		const p = this.selected;
-		if (!btn || !p) return;
+		if (!btn) return;
+
 		const act = btn.dataset.act;
-		if ((act === 'rotate' || act === 'remove') && !this._isMine(p)) {
-			this._setStatus('That model belongs to someone else in the room.', { warn: true });
-			return;
-		}
+		const items = this._selectedPlacements();
+		if (!items.length) return;
+
+		const owned = items.filter((p) => this._isMine(p));
+
 		if (act === 'rotate') {
+			const p = this.selected;
+			if (!p) return;
+
+			if (!this._isMine(p)) {
+				this._setStatus('That model belongs to someone else in the room.', { warn: true });
+				return;
+			}
+
 			p.yaw += Math.PI / 4;
 			p.group.rotation.y = p.yaw;
 			p._lastNetSend = 0;
 			this._netBroadcastTransform(p);
 			this._saveScene();
-		} else if (act === 'duplicate') {
-			this._addModel({ src: p.src, title: p.title }, { yaw: p.yaw, scale: this._logicalScale(p) });
-		} else if (act === 'remove') {
-			this._removePlacement(p);
-			this._setStatus('Removed.', {
-				actionLabel: 'Undo',
-				onAction: () => this._addModel({ src: p.src, title: p.title }, {
-					x: p.group.position.x, z: p.group.position.z, yaw: p.yaw, scale: this._logicalScale(p),
-				}),
-			});
+			this._syncTransformInspector();
+			return;
+		}
+
+		if (act === 'visibility') {
+			if (!owned.length) {
+				this._setStatus('Those models belong to someone else in the room.', { warn: true });
+				return;
+			}
+
+			const shouldShow = owned.every((p) => p.visible === false);
+
+			for (const p of owned) {
+				p.visible = shouldShow;
+				p.group.visible = shouldShow;
+				if (p.shadow) p.shadow.visible = shouldShow && !this.xrSession;
+
+				this._emit('visibility', {
+					placement: publicPlacement(p, this),
+					visible: p.visible,
+				});
+			}
+
+			// Hidden objects drop out of the active selection.
+			if (!shouldShow) {
+				for (const p of owned) this._selection.delete(p.id);
+			}
+
+			this._saveScene();
+			this._syncSelectionState();
+			return;
+		}
+
+		if (act === 'duplicate') {
+			const originals = [...items];
+			const copies = [];
+
+			for (let i = 0; i < originals.length; i++) {
+				const p = originals[i];
+				const copy = await this._addModel(
+					{ src: p.src, title: p.title },
+					{
+						x: p.group.position.x + 0.35,
+						y: p.group.position.y,
+						z: p.group.position.z + 0.35,
+						yaw: p.yaw,
+						scale: this._logicalScale(p),
+						visible: p.visible !== false,
+					},
+				);
+
+				if (copy) copies.push(copy);
+			}
+
+			if (copies.length) {
+				this._selection.clear();
+				for (const p of copies) this._selection.add(p.id);
+				this._syncSelectionState();
+			}
+
+			return;
+		}
+
+		if (act === 'remove') {
+			if (!owned.length) {
+				this._setStatus('Those models belong to someone else in the room.', { warn: true });
+				return;
+			}
+
+			const snapshots = owned.map((p) => ({
+				src: p.src,
+				title: p.title,
+				x: p.group.position.x,
+				y: p.group.position.y,
+				z: p.group.position.z,
+				yaw: p.yaw,
+				scale: this._logicalScale(p),
+				visible: p.visible !== false,
+			}));
+
+			// Clear selection first so per-placement removal doesn't auto-select
+			// some unrelated remaining model during a bulk delete.
+			this._selection.clear();
+			this.selected = null;
+			this._detachTransformGizmo();
+			this.selRing.visible = false;
+
+			for (const p of owned) {
+				this._removePlacement(p, { persist: false });
+			}
+
+			this._saveScene();
+			this._syncSelectionState();
+
+			this._setStatus(
+				owned.length === 1 ? 'Removed.' : `Removed ${owned.length} models.`,
+				{
+					actionLabel: 'Undo',
+					onAction: async () => {
+						const restored = [];
+
+						for (const snapshot of snapshots) {
+							const p = await this._addModel(
+								{ src: snapshot.src, title: snapshot.title },
+								snapshot,
+							);
+
+							if (p) restored.push(p);
+						}
+
+						if (restored.length) {
+							this._selection.clear();
+							for (const p of restored) this._selection.add(p.id);
+							this._syncSelectionState();
+						}
+					},
+				},
+			);
+
+			return;
 		}
 	}
 

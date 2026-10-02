@@ -177,7 +177,15 @@ export function studioStyles() {
 	font-size: 12.5px; font-weight: 650; color: var(--ars-accent-ink);
 	max-width: 26vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ars-selbar .ars-icon-btn { border-radius: 999px; padding: 7px 11px; font-size: 12.5px; background: rgba(255, 255, 255, 0.06); }
+.ars-selbar .ars-icon-btn {
+	border-radius: 999px;
+	padding: 7px 11px;
+	font-size: 12.5px;
+	background: rgba(255, 255, 255, 0.06);
+}
+.ars-selbar .ars-sel-visibility {
+	min-width: 48px;
+}
 /* The AR control lives in the top bar and already acts on the selected model, so
    the selection toolbar stays icon-sized edit actions. Duplicating it here
    collapsed to an unlabelled dot on a narrow phone. */
@@ -395,6 +403,7 @@ export function studioStyles() {
 .ars-scene-row.is-selected {
 	border-color: color-mix(in srgb, var(--ars-accent) 60%, transparent);
 	background: color-mix(in srgb, var(--ars-accent) 13%, transparent);
+	box-shadow: inset 3px 0 0 color-mix(in srgb, var(--ars-accent) 80%, transparent);
 }
 .ars-scene-row.is-hidden {
 	opacity: 0.56;

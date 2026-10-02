@@ -133,11 +133,39 @@ export function buildUI(host, cfg) {
 	// ── Status + selection ───────────────────────────────────────────────────
 	const status = el('div', { class: 'ars-status', hidden: true, role: 'status', 'aria-live': 'polite' });
 	const selName = el('span', { class: 'ars-sel-name' });
-	const selbar = el('div', { class: 'ars-selbar', hidden: true, role: 'toolbar', 'aria-label': 'Selected model' }, [
+	const selbar = el('div', { class: 'ars-selbar', hidden: true, role: 'toolbar', 'aria-label': 'Selected model or models' }, [
 		selName,
-		el('button', { type: 'button', class: 'ars-icon-btn', 'data-act': 'rotate', 'aria-label': 'Rotate the selected model' }, [el('span', { 'aria-hidden': 'true', text: '⟳' })]),
-		el('button', { type: 'button', class: 'ars-icon-btn', 'data-act': 'duplicate', 'aria-label': 'Duplicate the selected model' }, [el('span', { 'aria-hidden': 'true', text: '⧉' })]),
-		el('button', { type: 'button', class: 'ars-icon-btn', 'data-act': 'remove', 'aria-label': 'Remove the selected model' }, [el('span', { 'aria-hidden': 'true', text: '✕' })]),
+		el('button', {
+			type: 'button',
+			class: 'ars-icon-btn',
+			'data-act': 'rotate',
+			'aria-label': 'Rotate the selected model',
+		}, [
+			el('span', { 'aria-hidden': 'true', text: '⟳' }),
+		]),
+		el('button', {
+			type: 'button',
+			class: 'ars-icon-btn ars-sel-visibility',
+			'data-act': 'visibility',
+			'aria-label': 'Hide selected models',
+			text: 'Hide',
+		}),
+		el('button', {
+			type: 'button',
+			class: 'ars-icon-btn',
+			'data-act': 'duplicate',
+			'aria-label': 'Duplicate selected models',
+		}, [
+			el('span', { 'aria-hidden': 'true', text: '⧉' }),
+		]),
+		el('button', {
+			type: 'button',
+			class: 'ars-icon-btn',
+			'data-act': 'remove',
+			'aria-label': 'Remove selected models',
+		}, [
+			el('span', { 'aria-hidden': 'true', text: '✕' }),
+		]),
 	]);
 
 	// ── Scene tree ────────────────────────────────────────────────────────────
