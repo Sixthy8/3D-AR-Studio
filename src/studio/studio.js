@@ -756,13 +756,14 @@ export class ArStudio {
 
 			const result = await response.json().catch(() => ({}));
 
-			if (!response.ok || !result.image) {
+			if (!response.ok || !result.image || !result.mind) {
 				throw new Error(result.error || `upload failed (${response.status})`);
 			}
 
 			this.sceneTarget = normalizeSceneTarget({
 				...this.sceneTarget,
 				image: result.image,
+				mind: result.mind,
 			}, this.sceneType);
 
 			this._syncTargetPreview();
@@ -772,6 +773,7 @@ export class ArStudio {
 			this._emit('target-image', {
 				target: { ...this.sceneTarget },
 				image: result.image,
+				mind: result.mind,
 			});
 
 			this._setStatus('Target image added.');
@@ -792,6 +794,7 @@ export class ArStudio {
 
 		const {
 			image,
+			mind,
 			...rest
 		} = this.sceneTarget;
 
@@ -807,6 +810,7 @@ export class ArStudio {
 		this._emit('target-image', {
 			target: { ...this.sceneTarget },
 			image: '',
+			mind: '',
 		});
 
 		this._setStatus('Target image removed.');

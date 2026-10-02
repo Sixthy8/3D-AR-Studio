@@ -210,10 +210,12 @@ export function normalizeSceneTarget(raw, sceneType = 'free') {
 	}
 
 	const image = normalizeTargetImageUrl(raw.image);
+	const mind = normalizeTargetImageUrl(raw.mind);
 
 	return {
 		id: String(raw.id || '').trim().slice(0, 80) || 'target',
 		...(image ? { image } : {}),
+		...(mind ? { mind } : {}),
 		width: clamp(width, 0.01, 20),
 		height: clamp(height, 0.01, 20),
 		orientation: type === 'marker-vertical' ? 'vertical' : 'horizontal',

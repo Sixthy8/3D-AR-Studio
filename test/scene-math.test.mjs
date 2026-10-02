@@ -60,6 +60,7 @@ test('marker scene metadata round-trips through storage and share hashes', () =>
 		target: {
 			id: 'target-business-card',
 			image: 'https://a.com/card.jpg',
+			mind: 'https://a.com/card.mind',
 			width: 0.0889,
 			height: 0.0508,
 			visible: true,
@@ -73,6 +74,7 @@ test('marker scene metadata round-trips through storage and share hashes', () =>
 	assert.equal(stored.type, 'marker-horizontal');
 	assert.equal(stored.target.id, 'target-business-card');
 	assert.equal(stored.target.image, 'https://a.com/card.jpg');
+	assert.equal(stored.target.mind, 'https://a.com/card.mind');
 	assert.equal(stored.target.width, 0.0889);
 	assert.equal(stored.target.height, 0.0508);
 	assert.equal(stored.target.orientation, 'horizontal');
@@ -92,21 +94,25 @@ test('vertical marker scenes normalize orientation and hostile target metadata',
 	const valid = normalizeSceneTarget({
 		id: 'poster',
 		image: '/targets/poster.jpg',
+		mind: '/targets/poster.mind',
 		width: 0.4572,
 		height: 0.6096,
 	}, 'marker-vertical');
 
 	assert.equal(valid.orientation, 'vertical');
 	assert.equal(valid.image, '/targets/poster.jpg');
+	assert.equal(valid.mind, '/targets/poster.mind');
 
 	const unsafeImage = normalizeSceneTarget({
 		id: 'poster',
 		image: 'javascript:alert(1)',
+		mind: 'http://evil.example/poster.mind',
 		width: 0.4572,
 		height: 0.6096,
 	}, 'marker-vertical');
 
 	assert.equal('image' in unsafeImage, false);
+	assert.equal('mind' in unsafeImage, false);
 
 	assert.equal(normalizeSceneTarget({
 		width: -1,
