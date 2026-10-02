@@ -259,6 +259,87 @@ export function studioStyles() {
 	background: color-mix(in srgb, var(--ars-accent) 18%, transparent);
 	color: var(--ars-ink);
 }
+.ars-transform-snap-settings {
+	margin-bottom: 10px;
+	padding: 9px;
+	border: 1px solid var(--ars-line);
+	border-radius: 10px;
+	background: rgba(255, 255, 255, 0.025);
+}
+.ars-transform-snap-switch {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--ars-ink-dim);
+	cursor: pointer;
+}
+.ars-transform-snap-checkbox {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+.ars-transform-snap-indicator {
+	position: relative;
+	width: 28px;
+	height: 16px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.10);
+	border: 1px solid var(--ars-line);
+	transition: background 0.15s, border-color 0.15s;
+}
+.ars-transform-snap-indicator::after {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: var(--ars-ink-dim);
+	transition: transform 0.15s, background 0.15s;
+}
+.ars-transform-snap-checkbox:checked + .ars-transform-snap-indicator {
+	background: color-mix(in srgb, var(--ars-accent) 25%, transparent);
+	border-color: color-mix(in srgb, var(--ars-accent) 60%, transparent);
+}
+.ars-transform-snap-checkbox:checked + .ars-transform-snap-indicator::after {
+	transform: translateX(12px);
+	background: var(--ars-accent);
+}
+.ars-transform-snap-fields {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 6px;
+	margin-top: 8px;
+}
+.ars-transform-snap-field {
+	display: grid;
+	gap: 4px;
+	font-size: 9.5px;
+	font-weight: 650;
+	color: var(--ars-ink-faint);
+}
+.ars-transform-snap-field input {
+	width: 100%;
+	box-sizing: border-box;
+	border: 1px solid var(--ars-line);
+	border-radius: 7px;
+	background: rgba(0, 0, 0, 0.22);
+	color: var(--ars-ink);
+	font: inherit;
+	font-size: 11px;
+	padding: 6px;
+	outline: none;
+}
+.ars-transform-snap-field input:focus {
+	border-color: var(--ars-accent);
+}
+.ars-transform-snap-settings.is-disabled .ars-transform-snap-fields {
+	opacity: 0.42;
+}
+
 .ars-transform-fields {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));

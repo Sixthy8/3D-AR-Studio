@@ -270,6 +270,13 @@ export class ArStudio {
 		this._transformMode = 'translate';
 		this._gizmoDragging = false;
 		this._gizmoStartScale = 1;
+
+		// Editor-only transform snapping. These values affect manipulation only;
+		// the scene always stores the exact transform that results.
+		this._snapEnabled = false;
+		this._translationSnap = 0.10;
+		this._rotationSnapDeg = 15;
+		this._scaleSnap = 0.10;
 		this._pinch = createPinchState();
 		this._pinchEndedAt = -Infinity;
 		this._twist = null;
@@ -366,8 +373,20 @@ export class ArStudio {
 		});
 
 		bind(u.transformFields, 'change', (e) => this._onTransformFieldChange(e));
+
+		bind(u.transformSnapToggle, 'change', () => {
+			this._snapEnabled = Boolean(u.transformSnapToggle.checked);
+			this._applyTransformSnapSettings();
+		});
+
+		bind(u.transformSnapFields, 'change', (e) => {
+			this._onTransformSnapFieldChange(e);
+		});
+
 		bind(u.transformGround, 'click', () => this._snapSelectedToGround());
 		bind(u.transformReset, 'click', () => this._resetSelectedTransform());
+
+		this._applyTransformSnapSettings();
 
 		this.transformControls.addEventListener('mouseDown', () => {
 			this._gizmoDragging = true;
@@ -830,12 +849,82 @@ export class ArStudio {
 		this._gizmoDragging = false;
 	}
 
+	_applyTransformSnapSettings() {
+		const c = this.transformControls;
+		if (!c) return;
+
+		if (!this._snapEnabled) {
+			c.translationSnap = null;
+			c.rotationSnap = null;
+			c.scaleSnap = null;
+		} else {
+			c.translationSnap = this._translationSnap;
+			c.rotationSnap = this._rotationSnapDeg * Math.PI / 180;
+			c.scaleSnap = this._scaleSnap;
+		}
+
+		if (this.ui.transformSnapToggle) {
+			this.ui.transformSnapToggle.checked = this._snapEnabled;
+		}
+
+		const wrap = this.ui.transformSnapSettings;
+		if (wrap) wrap.classList.toggle('is-disabled', !this._snapEnabled);
+
+		const set = (name, value) => {
+			const input = this.ui.transformSnapFields?.querySelector(
+				`[data-transform-snap="${name}"]`,
+			);
+			if (input && document.activeElement !== input) input.value = value;
+		};
+
+		set('translate', this._translationSnap.toFixed(2));
+		set('rotate', String(this._rotationSnapDeg));
+		set('scale', this._scaleSnap.toFixed(2));
+	}
+
+	_onTransformSnapFieldChange(e) {
+		const input = e.target.closest('[data-transform-snap]');
+		if (!input) return;
+
+		const value = Number(input.value);
+		if (!Number.isFinite(value) || value <= 0) {
+			this._applyTransformSnapSettings();
+			return;
+		}
+
+		switch (input.dataset.transformSnap) {
+			case 'translate':
+				this._translationSnap = Math.min(10, Math.max(0.001, value));
+				break;
+
+			case 'rotate':
+				this._rotationSnapDeg = Math.min(180, Math.max(0.1, value));
+				break;
+
+			case 'scale':
+				this._scaleSnap = Math.min(1, Math.max(0.001, value));
+				break;
+
+			default:
+				return;
+		}
+
+		this._applyTransformSnapSettings();
+		this._emit('transform-snap', {
+			enabled: this._snapEnabled,
+			translation: this._translationSnap,
+			rotationDeg: this._rotationSnapDeg,
+			scale: this._scaleSnap,
+		});
+	}
+
 	_setTransformMode(mode) {
 		if (!['translate', 'rotate', 'scale'].includes(mode)) return;
 
 		this._transformMode = mode;
 		this.transformControls?.setMode(mode);
 		this._applyTransformModeAxes();
+		this._applyTransformSnapSettings();
 
 		for (const btn of this.ui.transformModes?.querySelectorAll('[data-transform-mode]') || []) {
 			btn.classList.toggle('is-active', btn.dataset.transformMode === mode);

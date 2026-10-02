@@ -169,6 +169,49 @@ export function buildUI(host, cfg) {
 		}),
 	]);
 
+	const transformSnapToggle = el('input', {
+		type: 'checkbox',
+		class: 'ars-transform-snap-checkbox',
+		'aria-label': 'Enable transform snapping',
+	});
+
+	const transformSnapSwitch = el('label', {
+		class: 'ars-transform-snap-switch',
+	}, [
+		transformSnapToggle,
+		el('span', { class: 'ars-transform-snap-indicator', 'aria-hidden': 'true' }),
+		el('span', { text: 'Snap' }),
+	]);
+
+	const snapField = (label, name, value, step) => el('label', {
+		class: 'ars-transform-snap-field',
+	}, [
+		el('span', { text: label }),
+		el('input', {
+			type: 'number',
+			value,
+			step,
+			min: step,
+			inputmode: 'decimal',
+			'data-transform-snap': name,
+		}),
+	]);
+
+	const transformSnapFields = el('div', {
+		class: 'ars-transform-snap-fields',
+	}, [
+		snapField('Move (m)', 'translate', '0.10', '0.01'),
+		snapField('Rotate (°)', 'rotate', '15', '1'),
+		snapField('Scale', 'scale', '0.10', '0.01'),
+	]);
+
+	const transformSnapSettings = el('div', {
+		class: 'ars-transform-snap-settings is-disabled',
+	}, [
+		transformSnapSwitch,
+		transformSnapFields,
+	]);
+
 	const transformField = (label, name, step = '0.01') => el('label', {
 		class: 'ars-transform-field',
 	}, [
@@ -208,6 +251,7 @@ export function buildUI(host, cfg) {
 	}, [
 		el('div', { class: 'ars-transform-title', text: 'Transform' }),
 		transformModes,
+		transformSnapSettings,
 		transformFields,
 		transformGround,
 		transformReset,
@@ -370,7 +414,9 @@ export function buildUI(host, cfg) {
 		empty, emptyCamera, emptyAdd, emptyForge,
 		selbar, selName,
 		scenePanel, sceneList, sceneClose,
-		transformInspector, transformModes, transformFields, transformGround, transformReset,
+		transformInspector, transformModes, transformFields,
+		transformSnapToggle, transformSnapSettings, transformSnapFields,
+		transformGround, transformReset,
 		tray, trayTabs, trayBody, trayClose,
 		qrModal, qrBox, qrLink, qrClose,
 		arModal, arThumb, arName, arPicker, arHint, arStatus, arGo, arScene, arXr, arQr, arClose,
