@@ -264,7 +264,9 @@ export function buildUI(host, cfg) {
 		transformField('X', 'x'),
 		transformField('Y', 'y'),
 		transformField('Z', 'z'),
+		transformField('Rot X°', 'rotX', '1'),
 		transformField('Yaw°', 'yaw', '1'),
+		transformField('Rot Z°', 'rotZ', '1'),
 		transformField('Scale', 'scale', '0.05'),
 	]);
 

@@ -142,6 +142,67 @@ test('a placed arrangement round-trips through the hash exactly', () => {
 	assert.deepEqual(restored[1], placements[1]);
 });
 
+test('three-axis rotation survives scene serialization and share hashes', () => {
+	const model = {
+		src: 'https://a.com/rotated.glb',
+		title: 'Rotated',
+		x: 0.4,
+		y: 0.2,
+		z: -1.8,
+		rotX: 0.35,
+		yaw: 1.2,
+		rotZ: -0.42,
+		scale: 1.4,
+	};
+
+	const stored = JSON.parse(serializeScene([model]));
+
+	assert.equal(stored.items[0].rotX, 0.35);
+	assert.equal(stored.items[0].yaw, 1.2);
+	assert.equal(stored.items[0].rotZ, -0.42);
+
+	const restored = sceneFromHashParam(sceneToHashParam([model]));
+
+	assert.equal(restored[0].rotX, 0.35);
+	assert.equal(restored[0].yaw, 1.2);
+	assert.equal(restored[0].rotZ, -0.42);
+});
+
+test('zero X/Z rotation is omitted so yaw-only scenes keep their old shape', () => {
+	const model = {
+		src: 'https://a.com/legacy.glb',
+		title: 'Legacy',
+		x: 0,
+		z: -2,
+		rotX: 0,
+		yaw: 0.5,
+		rotZ: 0,
+		scale: 1,
+	};
+
+	const stored = JSON.parse(serializeScene([model]));
+
+	assert.equal('rotX' in stored.items[0], false);
+	assert.equal('rotZ' in stored.items[0], false);
+	assert.equal(stored.items[0].yaw, 0.5);
+
+	const old = deserializeScene(JSON.stringify({
+		v: 1,
+		items: [{
+			src: 'https://a.com/old-yaw-only.glb',
+			title: 'Old',
+			x: 0,
+			z: -2,
+			yaw: 0.75,
+			scale: 1,
+		}],
+	}));
+
+	assert.equal(old[0].yaw, 0.75);
+	assert.equal('rotX' in old[0], false);
+	assert.equal('rotZ' in old[0], false);
+});
+
 test('model elevation survives scene serialization and share hashes', () => {
 	const elevated = {
 		src: 'https://a.com/floating.glb',

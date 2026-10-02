@@ -238,7 +238,9 @@ export function serializeScene(placements, metadata = {}) {
 			x: Number(p.x) || 0,
 			...(Number(p.y) ? { y: Number(p.y) } : {}),
 			z: Number(p.z) || 0,
+			...(Number(p.rotX) ? { rotX: Number(p.rotX) } : {}),
 			yaw: Number(p.yaw) || 0,
+			...(Number(p.rotZ) ? { rotZ: Number(p.rotZ) } : {}),
 			scale: clamp(Number(p.scale) || 1, SCALE_MIN, SCALE_MAX),
 			...(p.visible === false ? { visible: false } : {}),
 			...(typeof p.group === 'string' && /^g-[A-Za-z0-9_-]{4,64}$/.test(p.group)
@@ -308,7 +310,13 @@ export function deserializeSceneDocument(json) {
 			x: clamp(x, -50, 50),
 			...(hasY ? { y: clamp(y, -20, 20) } : {}),
 			z: clamp(z, -50, 50),
+			...(Number.isFinite(Number(it.rotX)) && Number(it.rotX) !== 0
+				? { rotX: Number(it.rotX) }
+				: {}),
 			yaw: Number.isFinite(Number(it.yaw)) ? Number(it.yaw) : 0,
+			...(Number.isFinite(Number(it.rotZ)) && Number(it.rotZ) !== 0
+				? { rotZ: Number(it.rotZ) }
+				: {}),
 			scale: clamp(Number(it.scale) || 1, SCALE_MIN, SCALE_MAX),
 			...(it.visible === false ? { visible: false } : {}),
 			...(typeof it.group === 'string' && /^g-[A-Za-z0-9_-]{4,64}$/.test(it.group)

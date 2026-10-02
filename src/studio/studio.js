@@ -1003,7 +1003,9 @@ export class ArStudio {
 					x: p.group.position.x,
 					y: p.group.position.y,
 					z: p.group.position.z,
+					rotX: p.rotX,
 					yaw: p.yaw,
+					rotZ: p.rotZ,
 					scale: this._logicalScale(p),
 					visible: p.visible !== false,
 					group: p.groupId || undefined,
@@ -1231,7 +1233,9 @@ export class ArStudio {
 	}
 
 	async _addModel({ src, title = '', poster = '' } = {}, {
-		x = null, y = 0, z = null, yaw = null, scale = null, visible = true, announce = true, persist = true,
+		x = null, y = 0, z = null,
+		rotX = 0, yaw = null, rotZ = 0,
+		scale = null, visible = true, announce = true, persist = true,
 		groupId = null,
 		remote = false, netId = null, ownerId = null,
 	} = {}) {
@@ -1270,8 +1274,15 @@ export class ArStudio {
 			pz = spot.z;
 		}
 		group.position.set(px, Number.isFinite(Number(y)) ? Number(y) : 0, pz);
-		const yawV = yaw ?? Math.atan2(this.camera.position.x - px, this.camera.position.z - pz);
-		group.rotation.y = yawV;
+
+		const rotXV = Number.isFinite(Number(rotX)) ? Number(rotX) : 0;
+		const yawV = yaw ?? Math.atan2(
+			this.camera.position.x - px,
+			this.camera.position.z - pz,
+		);
+		const rotZV = Number.isFinite(Number(rotZ)) ? Number(rotZ) : 0;
+
+		group.rotation.set(rotXV, yawV, rotZV);
 		if (scale) group.scale.setScalar(Math.min(PINCH_SCALE_MAX, Math.max(PINCH_SCALE_MIN, scale)));
 		group.visible = visible !== false;
 		this.scene.add(group);
@@ -1293,7 +1304,9 @@ export class ArStudio {
 			shadow,
 			mixer,
 			idle: null,
+			rotX: rotXV,
 			yaw: yawV,
+			rotZ: rotZV,
 			baseRadius: tpl.radius,
 			height: tpl.height || 0,
 			visible: visible !== false,
@@ -1395,7 +1408,11 @@ export class ArStudio {
 			onAction: async () => {
 				for (const it of items) {
 					await this._addModel({ src: it.src, title: it.title }, {
-						x: it.x, y: it.y ?? 0, z: it.z, yaw: it.yaw, scale: it.scale,
+						x: it.x, y: it.y ?? 0, z: it.z,
+						rotX: it.rotX ?? 0,
+						yaw: it.yaw,
+						rotZ: it.rotZ ?? 0,
+						scale: it.scale,
 						visible: it.visible !== false,
 						groupId: it.group || null,
 						announce: false,
@@ -1487,7 +1504,9 @@ export class ArStudio {
 				offsetX: p.group.position.x - center.x,
 				offsetY: p.group.position.y - center.y,
 				offsetZ: p.group.position.z - center.z,
+				rotX: p.rotX,
 				yaw: p.yaw,
+				rotZ: p.rotZ,
 				scale: this._logicalScale(p),
 			});
 		}
@@ -1583,7 +1602,9 @@ export class ArStudio {
 				offsetX: p.group.position.x - center.x,
 				offsetY: p.group.position.y - center.y,
 				offsetZ: p.group.position.z - center.z,
+				rotX: p.rotX,
 				yaw: p.yaw,
+				rotZ: p.rotZ,
 				scale: this._logicalScale(p),
 			});
 		}
@@ -1713,8 +1734,10 @@ export class ArStudio {
 				pivot.position.z + rz,
 			);
 
+			p.rotX = snap.rotX || 0;
 			p.yaw = snap.yaw + angle;
-			p.group.rotation.set(0, p.yaw, 0);
+			p.rotZ = snap.rotZ || 0;
+			p.group.rotation.set(p.rotX, p.yaw, p.rotZ);
 
 			const childScale = snap.scale * factor;
 			p.group.scale.setScalar(childScale);
@@ -1877,11 +1900,11 @@ export class ArStudio {
 		}
 
 		if (this._transformMode === 'rotate') {
-			// The scene format intentionally stores yaw only.
-			c.showX = false;
+			// Full pitch / yaw / roll for marker and free-scene authoring.
+			c.showX = true;
 			c.showY = true;
-			c.showZ = false;
-			c.setSpace('world');
+			c.showZ = true;
+			c.setSpace('local');
 			return;
 		}
 
@@ -1907,10 +1930,9 @@ export class ArStudio {
 		if (!p || !this._isMine(p)) return;
 
 		if (this._transformMode === 'rotate') {
-			// Only yaw belongs to the scene format.
-			p.group.rotation.x = 0;
-			p.group.rotation.z = 0;
+			p.rotX = p.group.rotation.x;
 			p.yaw = p.group.rotation.y;
+			p.rotZ = p.group.rotation.z;
 		}
 
 		if (this._transformMode === 'scale') {
@@ -2096,7 +2118,9 @@ export class ArStudio {
 		set('x', p.group.position.x.toFixed(3));
 		set('y', p.group.position.y.toFixed(3));
 		set('z', p.group.position.z.toFixed(3));
+		set('rotX', (p.rotX * 180 / Math.PI).toFixed(1));
 		set('yaw', (p.yaw * 180 / Math.PI).toFixed(1));
+		set('rotZ', (p.rotZ * 180 / Math.PI).toFixed(1));
 		set('scale', this._logicalScale(p).toFixed(3));
 
 		if (transformGround) {
@@ -2137,9 +2161,19 @@ export class ArStudio {
 				p.group.position.z = Math.min(50, Math.max(-50, value));
 				break;
 
+			case 'rotX':
+				p.rotX = value * Math.PI / 180;
+				p.group.rotation.x = p.rotX;
+				break;
+
 			case 'yaw':
 				p.yaw = value * Math.PI / 180;
-				p.group.rotation.set(0, p.yaw, 0);
+				p.group.rotation.y = p.yaw;
+				break;
+
+			case 'rotZ':
+				p.rotZ = value * Math.PI / 180;
+				p.group.rotation.z = p.rotZ;
 				break;
 
 			case 'scale': {
@@ -2194,7 +2228,9 @@ export class ArStudio {
 		if (!p || p.visible === false || !this._isMine(p)) return;
 
 		p.group.position.set(0, 0, -SPAWN_DISTANCE_M);
+		p.rotX = 0;
 		p.yaw = 0;
+		p.rotZ = 0;
 		p.group.rotation.set(0, 0, 0);
 		p.group.scale.setScalar(1);
 		p.group.userData._targetScale = 1;
@@ -2380,7 +2416,9 @@ export class ArStudio {
 					x: p.group.position.x + 0.35,
 					y: p.group.position.y,
 					z: p.group.position.z + 0.35,
+					rotX: p.rotX,
 					yaw: p.yaw,
+					rotZ: p.rotZ,
 					scale: this._logicalScale(p),
 					visible: p.visible !== false,
 				},
@@ -2425,7 +2463,9 @@ export class ArStudio {
 				x: p.group.position.x,
 				y: p.group.position.y,
 				z: p.group.position.z,
+				rotX: p.rotX,
 				yaw: p.yaw,
+				rotZ: p.rotZ,
 				scale: this._logicalScale(p),
 				visible: p.visible !== false,
 			};
@@ -2525,7 +2565,9 @@ export class ArStudio {
 						x: p.group.position.x + 0.35,
 						y: p.group.position.y,
 						z: p.group.position.z + 0.35,
+						rotX: p.rotX,
 						yaw: p.yaw,
+						rotZ: p.rotZ,
 						scale: this._logicalScale(p),
 						visible: p.visible !== false,
 					},
@@ -2555,7 +2597,9 @@ export class ArStudio {
 				x: p.group.position.x,
 				y: p.group.position.y,
 				z: p.group.position.z,
+				rotX: p.rotX,
 				yaw: p.yaw,
+				rotZ: p.rotZ,
 				scale: this._logicalScale(p),
 				visible: p.visible !== false,
 			}));
@@ -2667,7 +2711,9 @@ export class ArStudio {
 				x: it.x,
 				y: it.y ?? 0,
 				z: it.z,
+				rotX: it.rotX ?? 0,
 				yaw: it.yaw,
+				rotZ: it.rotZ ?? 0,
 				scale: it.scale,
 				visible: it.visible !== false,
 				groupId: it.group || null,
@@ -3317,7 +3363,15 @@ export class ArStudio {
 			this._saveScene();
 		} else if (e.key === 'd' || e.key === 'D') {
 			e.preventDefault();
-			this._addModel({ src: p.src, title: p.title }, { yaw: p.yaw, scale: this._logicalScale(p) });
+			this._addModel(
+				{ src: p.src, title: p.title },
+				{
+					rotX: p.rotX,
+					yaw: p.yaw,
+					rotZ: p.rotZ,
+					scale: this._logicalScale(p),
+				},
+			);
 		} else if (e.key === 'Delete' || e.key === 'Backspace') {
 			if (!editable) return;
 			e.preventDefault();
@@ -3325,7 +3379,13 @@ export class ArStudio {
 			this._setStatus('Removed.', {
 				actionLabel: 'Undo',
 				onAction: () => this._addModel({ src: p.src, title: p.title }, {
-					x: p.group.position.x, z: p.group.position.z, yaw: p.yaw, scale: this._logicalScale(p),
+					x: p.group.position.x,
+					y: p.group.position.y,
+					z: p.group.position.z,
+					rotX: p.rotX,
+					yaw: p.yaw,
+					rotZ: p.rotZ,
+					scale: this._logicalScale(p),
 				}),
 			});
 		}
@@ -3653,7 +3713,13 @@ export class ArStudio {
 	 * AR must get the half-size chair, not the cached full-size one.
 	 */
 	_arCacheKey(p) {
-		return `${p.src}|${p.group.scale.x.toFixed(3)}`;
+		return [
+			p.src,
+			p.group.scale.x.toFixed(3),
+			Number(p.rotX || 0).toFixed(5),
+			Number(p.yaw || 0).toFixed(5),
+			Number(p.rotZ || 0).toFixed(5),
+		].join('|');
 	}
 
 	/**
@@ -4473,7 +4539,9 @@ export class ArStudio {
 			x: p.group.position.x,
 			y: p.group.position.y,
 			z: p.group.position.z,
+			...(p.rotX ? { rotX: p.rotX } : {}),
 			yaw: p.yaw,
+			...(p.rotZ ? { rotZ: p.rotZ } : {}),
 			scale: this._logicalScale(p),
 			height: p.height || 0,
 		});
@@ -4887,7 +4955,11 @@ export class ArStudio {
 		this.clear();
 		for (const it of Array.isArray(items) ? items : []) {
 			await this._addModel({ src: it.src, title: it.title }, {
-				x: it.x, y: it.y ?? 0, z: it.z, yaw: it.yaw, scale: it.scale,
+				x: it.x, y: it.y ?? 0, z: it.z,
+				rotX: it.rotX ?? 0,
+				yaw: it.yaw,
+				rotZ: it.rotZ ?? 0,
+				scale: it.scale,
 				visible: it.visible !== false,
 				groupId: it.group || null,
 				announce: false,
@@ -5151,7 +5223,9 @@ function publicPlacement(p, studio) {
 		x: p.group.position.x,
 		y: p.group.position.y,
 		z: p.group.position.z,
+		...(p.rotX ? { rotX: p.rotX } : {}),
 		yaw: p.yaw,
+		...(p.rotZ ? { rotZ: p.rotZ } : {}),
 		scale: studio._logicalScale(p),
 		visible: p.visible !== false,
 		...(p.groupId ? { group: p.groupId } : {}),
