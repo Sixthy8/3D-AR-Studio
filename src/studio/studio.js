@@ -324,6 +324,10 @@ export class ArStudio {
 
 		bind(u.selbar, 'click', (e) => this._onSelbarClick(e));
 
+		bind(u.sceneBtn, 'click', () => this._toggleSceneTree());
+		bind(u.sceneClose, 'click', () => this._closeSceneTree());
+		bind(u.sceneList, 'click', (e) => this._onSceneTreeClick(e));
+
 		bind(u.roomBtn, 'click', () => this._openRoomModal());
 		bind(u.roomClose, 'click', () => this._closeRoomModal());
 		bind(u.roomModal, 'click', (e) => { if (e.target === u.roomModal) this._closeRoomModal(); });
@@ -451,6 +455,9 @@ export class ArStudio {
 		if (clearBtn) clearBtn.hidden = n === 0;
 		if (empty) empty.hidden = n > 0;
 		if (photoBtn) photoBtn.disabled = n === 0;
+		if (this.ui.sceneBtn) this.ui.sceneBtn.hidden = n === 0;
+		if (n === 0) this._closeSceneTree();
+		this._renderSceneTree();
 	}
 
 	// ── Placements ────────────────────────────────────────────────────────────
@@ -488,6 +495,7 @@ export class ArStudio {
 		if (!p) {
 			selbar.hidden = true;
 			this.selRing.visible = false;
+			this._renderSceneTree();
 			this._emit('select', { placement: null });
 			return;
 		}
@@ -496,6 +504,7 @@ export class ArStudio {
 		this.selRing.visible = !this.xrSession;
 		this._positionSelRing();
 		this._warmQuickLook();
+		this._renderSceneTree();
 		this._emit('select', { placement: publicPlacement(p, this) });
 	}
 
@@ -738,6 +747,174 @@ export class ArStudio {
 				}
 			},
 		});
+	}
+
+	// ── Scene tree ────────────────────────────────────────────────────────────
+
+	_toggleSceneTree() {
+		const { scenePanel, sceneBtn } = this.ui;
+		if (!scenePanel) return;
+
+		const opening = scenePanel.hidden;
+		scenePanel.hidden = !opening;
+		sceneBtn?.setAttribute('aria-expanded', String(opening));
+
+		if (opening) {
+			this._renderSceneTree();
+			this._emit('scene-tree', { open: true });
+		} else {
+			this._emit('scene-tree', { open: false });
+		}
+	}
+
+	_closeSceneTree() {
+		const { scenePanel, sceneBtn } = this.ui;
+		if (!scenePanel || scenePanel.hidden) return;
+		scenePanel.hidden = true;
+		sceneBtn?.setAttribute('aria-expanded', 'false');
+		this._emit('scene-tree', { open: false });
+	}
+
+	_renderSceneTree() {
+		const list = this.ui.sceneList;
+		if (!list) return;
+
+		list.textContent = '';
+
+		if (!this.placements.length) {
+			list.appendChild(el('p', {
+				class: 'ars-scene-empty',
+				text: 'No models in this scene.',
+			}));
+			return;
+		}
+
+		for (const p of this.placements) {
+			const mine = this._isMine(p);
+			const selected = this.selected === p;
+
+			const select = el('button', {
+				type: 'button',
+				class: 'ars-scene-select',
+				'data-act': 'select',
+				'aria-pressed': selected ? 'true' : 'false',
+				text: p.title || 'Model',
+			});
+
+			const actions = el('div', {
+				class: 'ars-scene-actions',
+				'aria-label': `Actions for ${p.title || 'model'}`,
+			}, [
+				el('button', {
+					type: 'button',
+					class: 'ars-scene-action',
+					'data-act': 'rename',
+					text: 'Rename',
+					disabled: !mine,
+				}),
+				el('button', {
+					type: 'button',
+					class: 'ars-scene-action',
+					'data-act': 'duplicate',
+					text: 'Duplicate',
+				}),
+				el('button', {
+					type: 'button',
+					class: 'ars-scene-action ars-scene-danger',
+					'data-act': 'remove',
+					text: 'Delete',
+					disabled: !mine,
+				}),
+			]);
+
+			const row = el('div', {
+				class: `ars-scene-row${selected ? ' is-selected' : ''}`,
+				role: 'listitem',
+				'data-placement-id': p.id,
+			}, [
+				select,
+				actions,
+			]);
+
+			list.appendChild(row);
+		}
+	}
+
+	_onSceneTreeClick(e) {
+		const btn = e.target.closest('[data-act]');
+		const row = e.target.closest('[data-placement-id]');
+		if (!btn || !row) return;
+
+		const p = this.placements.find((item) => item.id === row.dataset.placementId);
+		if (!p) {
+			this._renderSceneTree();
+			return;
+		}
+
+		const act = btn.dataset.act;
+
+		if (act === 'select') {
+			this._select(p);
+			return;
+		}
+
+		if (act === 'rename') {
+			if (!this._isMine(p)) {
+				this._setStatus('That model belongs to someone else in the room.', { warn: true });
+				return;
+			}
+
+			const next = window.prompt('Rename model', p.title || 'Model');
+			if (next === null) return;
+
+			const title = next.trim().slice(0, 120);
+			if (!title || title === p.title) return;
+
+			p.title = title;
+			if (this.selected === p && this.ui.selName) this.ui.selName.textContent = title;
+			this._saveScene();
+			this._renderSceneTree();
+			this._emit('rename', { placement: publicPlacement(p, this) });
+			return;
+		}
+
+		if (act === 'duplicate') {
+			this._addModel(
+				{ src: p.src, title: p.title },
+				{
+					x: p.group.position.x + 0.35,
+					z: p.group.position.z + 0.35,
+					yaw: p.yaw,
+					scale: this._logicalScale(p),
+				},
+			);
+			return;
+		}
+
+		if (act === 'remove') {
+			if (!this._isMine(p)) {
+				this._setStatus('That model belongs to someone else in the room.', { warn: true });
+				return;
+			}
+
+			const snapshot = {
+				src: p.src,
+				title: p.title,
+				x: p.group.position.x,
+				z: p.group.position.z,
+				yaw: p.yaw,
+				scale: this._logicalScale(p),
+			};
+
+			this._removePlacement(p);
+			this._setStatus('Removed.', {
+				actionLabel: 'Undo',
+				onAction: () => this._addModel(
+					{ src: snapshot.src, title: snapshot.title },
+					snapshot,
+				),
+			});
+		}
 	}
 
 	_onSelbarClick(e) {

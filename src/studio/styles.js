@@ -56,7 +56,7 @@ export function studioStyles() {
 .ars-hud > * { pointer-events: none; }
 .ars-hud a, .ars-hud button, .ars-hud input, .ars-hud form,
 .ars-hud .ars-top, .ars-hud .ars-dock, .ars-hud .ars-selbar,
-.ars-hud .ars-tray, .ars-hud .ars-modal { pointer-events: auto; }
+.ars-hud .ars-scene-panel, .ars-hud .ars-tray, .ars-hud .ars-modal { pointer-events: auto; }
 
 /* ── Top bar ── */
 .ars-top {
@@ -182,6 +182,131 @@ export function studioStyles() {
    the selection toolbar stays icon-sized edit actions. Duplicating it here
    collapsed to an unlabelled dot on a narrow phone. */
 .ars-top .ars-icon-btn[aria-busy="true"] { opacity: 0.7; cursor: progress; }
+
+/* ── Scene tree ── */
+.ars-scene-panel {
+	position: absolute;
+	top: calc(env(safe-area-inset-top, 0px) + 66px);
+	right: 14px;
+	bottom: calc(env(safe-area-inset-bottom, 0px) + 86px);
+	z-index: 14;
+	width: min(340px, calc(100vw - 28px));
+	background: rgba(11, 12, 16, 0.96);
+	border: 1px solid var(--ars-line);
+	border-radius: 18px;
+	box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
+	backdrop-filter: blur(16px);
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	animation: ars-scene-in 0.18s ease;
+}
+@keyframes ars-scene-in {
+	from { opacity: 0; transform: translateX(8px); }
+	to { opacity: 1; transform: none; }
+}
+.ars-scene-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px;
+	border-bottom: 1px solid var(--ars-line);
+}
+.ars-scene-head h2 {
+	margin: 0;
+	font-size: 15px;
+	font-weight: 750;
+}
+.ars-scene-subtitle {
+	margin: 2px 0 0;
+	font-size: 11.5px;
+	color: var(--ars-ink-faint);
+}
+.ars-scene-list {
+	flex: 1 1 auto;
+	overflow-y: auto;
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	-webkit-overflow-scrolling: touch;
+}
+.ars-scene-row {
+	border: 1px solid var(--ars-line);
+	border-radius: 13px;
+	background: rgba(255, 255, 255, 0.04);
+	overflow: hidden;
+	transition: border-color 0.15s, background 0.15s;
+}
+.ars-scene-row.is-selected {
+	border-color: color-mix(in srgb, var(--ars-accent) 60%, transparent);
+	background: color-mix(in srgb, var(--ars-accent) 13%, transparent);
+}
+.ars-scene-select {
+	appearance: none;
+	width: 100%;
+	border: 0;
+	background: transparent;
+	color: var(--ars-ink);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 700;
+	text-align: left;
+	padding: 11px 12px 9px;
+	cursor: pointer;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.ars-scene-select[aria-pressed="true"] {
+	color: var(--ars-accent-ink);
+}
+.ars-scene-actions {
+	display: flex;
+	gap: 4px;
+	padding: 0 8px 8px;
+	flex-wrap: wrap;
+}
+.ars-scene-action {
+	appearance: none;
+	border: 0;
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.06);
+	color: var(--ars-ink-dim);
+	font: inherit;
+	font-size: 10.5px;
+	font-weight: 650;
+	padding: 6px 8px;
+	cursor: pointer;
+}
+.ars-scene-action:hover {
+	background: rgba(255, 255, 255, 0.11);
+	color: var(--ars-ink);
+}
+.ars-scene-action[disabled] {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+.ars-scene-danger:hover {
+	color: var(--ars-warn);
+}
+.ars-scene-empty {
+	margin: auto;
+	padding: 24px 12px;
+	font-size: 12.5px;
+	color: var(--ars-ink-faint);
+	text-align: center;
+}
+
+@media (max-width: 640px) {
+	.ars-scene-panel {
+		left: 10px;
+		right: 10px;
+		width: auto;
+		top: calc(env(safe-area-inset-top, 0px) + 64px);
+		bottom: calc(env(safe-area-inset-bottom, 0px) + 82px);
+	}
+}
 
 /* ── Bottom dock ── */
 .ars-dock {

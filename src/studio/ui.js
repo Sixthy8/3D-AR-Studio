@@ -66,6 +66,16 @@ export function buildUI(host, cfg) {
 		: null;
 	const title = el('span', { class: 'ars-title', text: t.title || 'AR Studio' });
 	const count = el('span', { class: 'ars-count', hidden: true, role: 'status', 'aria-live': 'polite' });
+	const sceneBtn = el('button', {
+		type: 'button',
+		class: 'ars-icon-btn ars-scene-btn',
+		hidden: true,
+		'aria-expanded': 'false',
+		'aria-label': 'Open scene model tree',
+	}, [
+		el('span', { 'aria-hidden': 'true', text: '▤' }),
+		'Scene',
+	]);
 	const roomBtn = canRoom
 		? el('button', { type: 'button', class: 'ars-icon-btn', 'aria-label': 'Open a shared room so other people can build in this scene with you' }, [
 			el('span', { 'aria-hidden': 'true', text: '👥' }),
@@ -89,7 +99,7 @@ export function buildUI(host, cfg) {
 	]);
 
 	const top = el('div', { class: 'ars-top' }, [
-		back, title, count,
+		back, title, count, sceneBtn,
 		el('span', { class: 'ars-spacer' }),
 		roomBtn, qrBtn, xrBtn, cameraBtn,
 	]);
@@ -128,6 +138,35 @@ export function buildUI(host, cfg) {
 		el('button', { type: 'button', class: 'ars-icon-btn', 'data-act': 'rotate', 'aria-label': 'Rotate the selected model' }, [el('span', { 'aria-hidden': 'true', text: '⟳' })]),
 		el('button', { type: 'button', class: 'ars-icon-btn', 'data-act': 'duplicate', 'aria-label': 'Duplicate the selected model' }, [el('span', { 'aria-hidden': 'true', text: '⧉' })]),
 		el('button', { type: 'button', class: 'ars-icon-btn', 'data-act': 'remove', 'aria-label': 'Remove the selected model' }, [el('span', { 'aria-hidden': 'true', text: '✕' })]),
+	]);
+
+	// ── Scene tree ────────────────────────────────────────────────────────────
+	const sceneList = el('div', {
+		class: 'ars-scene-list',
+		role: 'list',
+		'aria-label': 'Models in this scene',
+	});
+	const sceneClose = el('button', {
+		type: 'button',
+		class: 'ars-icon-btn',
+		'aria-label': 'Close scene tree',
+	}, [
+		el('span', { 'aria-hidden': 'true', text: '✕' }),
+	]);
+	const scenePanel = el('aside', {
+		class: 'ars-scene-panel',
+		hidden: true,
+		'aria-label': 'Scene model tree',
+	}, [
+		el('div', { class: 'ars-scene-head' }, [
+			el('div', {}, [
+				el('h2', { text: 'Scene' }),
+				el('p', { class: 'ars-scene-subtitle', text: 'Models in this composition' }),
+			]),
+			el('span', { class: 'ars-spacer' }),
+			sceneClose,
+		]),
+		sceneList,
 	]);
 
 	// ── Dock ─────────────────────────────────────────────────────────────────
@@ -235,7 +274,9 @@ export function buildUI(host, cfg) {
 		]),
 	]);
 
-	const hud = el('div', { class: 'ars-hud' }, [top, empty, status, chip, selbar, dock, tray, qrModal, arModal, roomModal]);
+	const hud = el('div', { class: 'ars-hud' }, [
+		top, empty, status, chip, selbar, scenePanel, dock, tray, qrModal, arModal, roomModal,
+	]);
 	const root = el('div', { class: 'ars-root' }, [video, canvas, hud]);
 	if (t.accent) root.style.setProperty('--ars-accent', t.accent);
 	host.appendChild(root);
@@ -251,10 +292,11 @@ export function buildUI(host, cfg) {
 
 	return {
 		root, video, canvas, hud, top, title, count, status, chip,
-		cameraBtn, xrBtn, qrBtn, roomBtn, addBtn, photoBtn, clearBtn,
+		cameraBtn, xrBtn, qrBtn, roomBtn, sceneBtn, addBtn, photoBtn, clearBtn,
 		forgeForm: canGenerate ? forgeForm : null, forgeInput: canGenerate ? forgeInput : null, forgeGo: canGenerate ? forgeGo : null,
 		empty, emptyCamera, emptyAdd, emptyForge,
 		selbar, selName,
+		scenePanel, sceneList, sceneClose,
 		tray, trayTabs, trayBody, trayClose,
 		qrModal, qrBox, qrLink, qrClose,
 		arModal, arThumb, arName, arPicker, arHint, arStatus, arGo, arScene, arXr, arQr, arClose,
