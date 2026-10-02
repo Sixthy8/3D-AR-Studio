@@ -145,6 +145,14 @@ export function buildUI(host, cfg) {
 		]),
 		el('button', {
 			type: 'button',
+			class: 'ars-icon-btn ars-sel-group',
+			'data-act': 'group',
+			'aria-label': 'Group selected models',
+			hidden: true,
+			text: 'Group',
+		}),
+		el('button', {
+			type: 'button',
 			class: 'ars-icon-btn ars-sel-visibility',
 			'data-act': 'visibility',
 			'aria-label': 'Hide selected models',

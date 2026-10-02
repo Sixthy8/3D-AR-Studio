@@ -205,6 +205,11 @@ export class ArStudio {
 		// `_selection` is editor-only and may contain zero, one, or many placement IDs.
 		this.selected = null;
 		this._selection = new Set();
+
+		// Phase 1 grouping is editor-runtime only. Models remain independent scene
+		// placements; this helper pivot drives their transforms without re-parenting
+		// them or changing the persisted scene format.
+		this._runtimeGroup = null;
 		this.arActive = false;
 		this.mediaStream = null;
 		this.arTransitioning = false;
@@ -404,6 +409,15 @@ export class ArStudio {
 
 		this.transformControls.addEventListener('mouseUp', () => {
 			this._gizmoDragging = false;
+
+			if (
+				this._runtimeGroup
+				&& this.transformControls?.object === this._runtimeGroup.pivot
+			) {
+				this._finalizeRuntimeGroupTransform();
+				return;
+			}
+
 			const p = this.selected;
 			if (!p) return;
 
@@ -567,6 +581,7 @@ export class ArStudio {
 	}
 
 	_select(p) {
+		this._dropRuntimeGroup();
 		this._selection.clear();
 		if (p) this._selection.add(p.id);
 		this._syncSelectionState();
@@ -574,6 +589,8 @@ export class ArStudio {
 
 	_toggleSelection(p) {
 		if (!p) return;
+
+		this._dropRuntimeGroup();
 
 		if (this._selection.has(p.id)) this._selection.delete(p.id);
 		else this._selection.add(p.id);
@@ -609,15 +626,28 @@ export class ArStudio {
 		selbar.hidden = false;
 
 		const multi = selectedItems.length > 1;
+		const grouped = multi && this._runtimeGroupMatchesSelection();
 
 		if (selName) {
-			selName.textContent = multi
-				? `${selectedItems.length} models selected`
-				: single.title || 'Model';
+			selName.textContent = grouped
+				? `Group · ${selectedItems.length} models`
+				: multi
+					? `${selectedItems.length} models selected`
+					: single.title || 'Model';
 		}
 
 		const rotateBtn = selbar.querySelector('[data-act="rotate"]');
 		if (rotateBtn) rotateBtn.hidden = multi;
+
+		const groupBtn = selbar.querySelector('[data-act="group"]');
+		if (groupBtn) {
+			groupBtn.hidden = !multi;
+			groupBtn.textContent = grouped ? 'Ungroup' : 'Group';
+			groupBtn.setAttribute(
+				'aria-label',
+				grouped ? 'Ungroup selected models' : 'Group selected models',
+			);
+		}
 
 		const visibilityBtn = selbar.querySelector('[data-act="visibility"]');
 		if (visibilityBtn) {
@@ -631,7 +661,10 @@ export class ArStudio {
 
 		if (multi) {
 			this.selRing.visible = false;
-			this._detachTransformGizmo();
+
+			if (grouped) this._attachRuntimeGroupGizmo();
+			else this._detachTransformGizmo();
+
 			this._syncTransformInspector();
 		} else {
 			this.selRing.visible = single.visible !== false && !this.xrSession;
@@ -850,6 +883,10 @@ export class ArStudio {
 	}
 
 	_removePlacement(p, { persist = true, broadcast = true } = {}) {
+		if (this._runtimeGroup?.memberIds.has(p.id)) {
+			this._dropRuntimeGroup();
+		}
+
 		const i = this.placements.indexOf(p);
 		if (i === -1) return;
 		this.placements.splice(i, 1);
@@ -903,6 +940,239 @@ export class ArStudio {
 					});
 				}
 			},
+		});
+	}
+
+	// ── Runtime grouping ──────────────────────────────────────────────────────
+
+	_runtimeGroupMatchesSelection() {
+		const g = this._runtimeGroup;
+		if (!g) return false;
+		if (g.memberIds.size !== this._selection.size) return false;
+
+		for (const id of g.memberIds) {
+			if (!this._selection.has(id)) return false;
+		}
+
+		return true;
+	}
+
+	_dropRuntimeGroup() {
+		const g = this._runtimeGroup;
+		if (!g) return;
+
+		if (this.transformControls?.object === g.pivot) {
+			this._detachTransformGizmo();
+		}
+
+		this.scene.remove(g.pivot);
+		this._runtimeGroup = null;
+	}
+
+	_createRuntimeGroup() {
+		const items = this._selectedPlacements();
+
+		if (items.length < 2) {
+			this._setStatus('Select at least two models to group.', { warn: true });
+			return;
+		}
+
+		if (items.some((p) => !this._isMine(p))) {
+			this._setStatus(
+				'Only models you control can be grouped.',
+				{ warn: true },
+			);
+			return;
+		}
+
+		this._dropRuntimeGroup();
+
+		const center = items.reduce(
+			(acc, p) => {
+				acc.x += p.group.position.x;
+				acc.y += p.group.position.y;
+				acc.z += p.group.position.z;
+				return acc;
+			},
+			{ x: 0, y: 0, z: 0 },
+		);
+
+		center.x /= items.length;
+		center.y /= items.length;
+		center.z /= items.length;
+
+		const pivot = new Group();
+		pivot.name = 'RuntimeSelectionGroup';
+		pivot.position.set(center.x, center.y, center.z);
+		pivot.rotation.set(0, 0, 0);
+		pivot.scale.setScalar(1);
+
+		const snapshots = new Map();
+
+		for (const p of items) {
+			snapshots.set(p.id, {
+				offsetX: p.group.position.x - center.x,
+				offsetY: p.group.position.y - center.y,
+				offsetZ: p.group.position.z - center.z,
+				yaw: p.yaw,
+				scale: this._logicalScale(p),
+			});
+		}
+
+		this.scene.add(pivot);
+
+		this._runtimeGroup = {
+			memberIds: new Set(items.map((p) => p.id)),
+			pivot,
+			snapshots,
+		};
+
+		this.selected = null;
+		this.selRing.visible = false;
+		this._syncSelectionState();
+
+		this._setStatus(
+			`Grouped ${items.length} models. Move, rotate or scale them together.`,
+		);
+		this._emit('group', {
+			count: items.length,
+			placements: items.map((p) => publicPlacement(p, this)),
+		});
+	}
+
+	_ungroupRuntimeSelection() {
+		const g = this._runtimeGroup;
+		if (!g) return;
+
+		const count = g.memberIds.size;
+		this._dropRuntimeGroup();
+		this._syncSelectionState();
+
+		this._setStatus(`Ungrouped ${count} models.`);
+		this._emit('ungroup', { count });
+	}
+
+	_attachRuntimeGroupGizmo() {
+		const g = this._runtimeGroup;
+
+		if (
+			!this.transformControls
+			|| !g
+			|| !this._runtimeGroupMatchesSelection()
+			|| this.xrSession
+		) {
+			this._detachTransformGizmo();
+			return;
+		}
+
+		this.transformControls.attach(g.pivot);
+		this.transformHelper.visible = true;
+		this._applyTransformModeAxes();
+		this._applyTransformSnapSettings();
+	}
+
+	_applyRuntimeGroupTransform() {
+		const g = this._runtimeGroup;
+		if (!g || !this._runtimeGroupMatchesSelection()) return;
+
+		const pivot = g.pivot;
+
+		// Groups obey the same yaw-only rotation rule as placements.
+		pivot.rotation.x = 0;
+		pivot.rotation.z = 0;
+
+		let factor = pivot.scale.x;
+
+		if (this._transformMode === 'scale') {
+			const axis = String(this.transformControls?.axis || '');
+
+			if (axis.includes('Y')) factor = pivot.scale.y;
+			else if (axis.includes('Z')) factor = pivot.scale.z;
+
+			if (!Number.isFinite(factor)) factor = 1;
+
+			// Choose a factor that keeps every real placement inside the normal
+			// placement scale limits while preserving relative sizes.
+			let minFactor = 0;
+			let maxFactor = Infinity;
+
+			for (const snap of g.snapshots.values()) {
+				minFactor = Math.max(minFactor, PINCH_SCALE_MIN / snap.scale);
+				maxFactor = Math.min(maxFactor, PINCH_SCALE_MAX / snap.scale);
+			}
+
+			factor = Math.min(maxFactor, Math.max(minFactor, factor));
+			pivot.scale.setScalar(factor);
+		} else {
+			factor = pivot.scale.x;
+		}
+
+		const angle = pivot.rotation.y;
+		const cos = Math.cos(angle);
+		const sin = Math.sin(angle);
+
+		for (const id of g.memberIds) {
+			const p = this.placements.find((item) => item.id === id);
+			const snap = g.snapshots.get(id);
+
+			if (!p || !snap || !this._isMine(p)) continue;
+
+			const sx = snap.offsetX * factor;
+			const sy = snap.offsetY * factor;
+			const sz = snap.offsetZ * factor;
+
+			const rx = sx * cos + sz * sin;
+			const rz = -sx * sin + sz * cos;
+
+			p.group.position.set(
+				pivot.position.x + rx,
+				pivot.position.y + sy,
+				pivot.position.z + rz,
+			);
+
+			p.yaw = snap.yaw + angle;
+			p.group.rotation.set(0, p.yaw, 0);
+
+			const childScale = snap.scale * factor;
+			p.group.scale.setScalar(childScale);
+			p.group.userData._targetScale = childScale;
+			p.spawnT = 1;
+
+			if (p.shadow) {
+				p.shadow.position.set(
+					p.group.position.x,
+					0.004,
+					p.group.position.z,
+				);
+				p.shadow.scale.setScalar(childScale);
+			}
+
+			this._netBroadcastTransform(p);
+		}
+
+		this._warmQuickLook();
+	}
+
+	_finalizeRuntimeGroupTransform() {
+		const g = this._runtimeGroup;
+		if (!g) return;
+
+		for (const id of g.memberIds) {
+			const p = this.placements.find((item) => item.id === id);
+			if (!p || !this._isMine(p)) continue;
+
+			p._lastNetSend = 0;
+			this._netBroadcastTransform(p);
+		}
+
+		this._saveScene();
+		this._warmQuickLook();
+		this._renderSceneTree();
+
+		this._emit('group-transform', {
+			placements: this._selectedPlacements().map(
+				(p) => publicPlacement(p, this),
+			),
 		});
 	}
 
@@ -1042,6 +1312,14 @@ export class ArStudio {
 	}
 
 	_onGizmoObjectChange() {
+		if (
+			this._runtimeGroup
+			&& this.transformControls?.object === this._runtimeGroup.pivot
+		) {
+			this._applyRuntimeGroupTransform();
+			return;
+		}
+
 		const p = this.selected;
 		if (!p || !this._isMine(p)) return;
 
@@ -1423,6 +1701,21 @@ export class ArStudio {
 		if (!items.length) return;
 
 		const owned = items.filter((p) => this._isMine(p));
+
+		if (act === 'group') {
+			if (this._runtimeGroupMatchesSelection()) {
+				this._ungroupRuntimeSelection();
+			} else {
+				this._createRuntimeGroup();
+			}
+			return;
+		}
+
+		// Bulk operations bake the current group transform into the real placements,
+		// then dismiss the runtime helper before changing scene membership/visibility.
+		if (this._runtimeGroupMatchesSelection()) {
+			this._dropRuntimeGroup();
+		}
 
 		if (act === 'rotate') {
 			const p = this.selected;
@@ -1906,6 +2199,15 @@ export class ArStudio {
 		const dy = e.clientY - down.y;
 		if (Math.hypot(dx, dy) > 6) down.moved = true;
 		if (!down.moved) return;
+
+		if (
+			down.placement
+			&& this._runtimeGroup?.memberIds.has(down.placement.id)
+		) {
+			// A grouped selection moves through its shared gizmo. Individual floor
+			// dragging would desynchronise the helper pivot from its children.
+			return;
+		}
 
 		if (down.placement && this._isMine(down.placement)) {
 			// Drag a model along the floor.
@@ -3040,7 +3342,11 @@ export class ArStudio {
 		}
 		this.grid.visible = !this.arActive;
 		if (!this.arActive) this.scene.fog = this._fog;
-		if (this.selected?.visible !== false) this._attachTransformGizmo(this.selected);
+		if (this._runtimeGroupMatchesSelection()) {
+			this._attachRuntimeGroupGizmo();
+		} else if (this.selected?.visible !== false) {
+			this._attachTransformGizmo(this.selected);
+		}
 		this._syncTransformInspector();
 		this._saveScene();
 		this._startLoop();
@@ -3707,6 +4013,7 @@ export class ArStudio {
 		}
 		this._ro?.disconnect();
 
+		this._dropRuntimeGroup();
 		this._detachTransformGizmo();
 		if (this.transformHelper) this.scene.remove(this.transformHelper);
 		this.transformControls?.dispose?.();

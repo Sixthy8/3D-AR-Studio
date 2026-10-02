@@ -186,6 +186,10 @@ export function studioStyles() {
 .ars-selbar .ars-sel-visibility {
 	min-width: 48px;
 }
+.ars-selbar .ars-sel-group {
+	min-width: 58px;
+	color: var(--ars-accent-ink);
+}
 /* The AR control lives in the top bar and already acts on the selected model, so
    the selection toolbar stays icon-sized edit actions. Duplicating it here
    collapsed to an unlabelled dot on a narrow phone. */
