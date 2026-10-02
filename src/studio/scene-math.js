@@ -182,6 +182,7 @@ export function serializeScene(placements) {
 			src: String(p.src || ''),
 			title: String(p.title || '').slice(0, 120),
 			x: Number(p.x) || 0,
+			...(Number(p.y) ? { y: Number(p.y) } : {}),
 			z: Number(p.z) || 0,
 			yaw: Number(p.yaw) || 0,
 			scale: clamp(Number(p.scale) || 1, SCALE_MIN, SCALE_MAX),
@@ -213,12 +214,21 @@ export function deserializeScene(json) {
 		const src = normalizeGlbUrl(it?.src);
 		if (!src) continue;
 		const x = Number(it.x);
+		const hasY = it.y !== undefined;
+		const y = hasY ? Number(it.y) : 0;
 		const z = Number(it.z);
-		if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+
+		if (
+			!Number.isFinite(x)
+			|| !Number.isFinite(z)
+			|| (hasY && !Number.isFinite(y))
+		) continue;
+
 		out.push({
 			src,
 			title: String(it.title || '').slice(0, 120),
 			x: clamp(x, -50, 50),
+			...(hasY ? { y: clamp(y, -20, 20) } : {}),
 			z: clamp(z, -50, 50),
 			yaw: Number.isFinite(Number(it.yaw)) ? Number(it.yaw) : 0,
 			scale: clamp(Number(it.scale) || 1, SCALE_MIN, SCALE_MAX),

@@ -29,6 +29,7 @@ import {
 	Raycaster, RingGeometry, Scene, Vector2, Vector3, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { clone as cloneSkinnedScene } from 'three/addons/utils/SkeletonUtils.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 import { resolveConfig } from '../config.js';
 import { createLogger } from '../log.js';
@@ -180,6 +181,17 @@ export class ArStudio {
 		this.selRing.visible = false;
 		this.scene.add(this.selRing);
 
+		// Desktop/editor transform gizmo. The helper itself is ordinary scene
+		// content, while TransformControls owns pointer interaction on the canvas.
+		this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
+		this.transformHelper = this.transformControls.getHelper();
+		this.transformHelper.visible = false;
+		this.scene.add(this.transformHelper);
+
+		this.transformControls.setSpace('world');
+		this.transformControls.setMode('translate');
+		this.transformControls.size = 0.85;
+
 		this.shadowTex = makeShadowTexture();
 		this.reducedMotion = prefersReducedMotion();
 		this._applyCameraLook();
@@ -254,6 +266,10 @@ export class ArStudio {
 		this._ndc = new Vector2();
 		this._pointer = null;
 		this._userLooked = false;
+
+		this._transformMode = 'translate';
+		this._gizmoDragging = false;
+		this._gizmoStartScale = 1;
 		this._pinch = createPinchState();
 		this._pinchEndedAt = -Infinity;
 		this._twist = null;
@@ -340,6 +356,39 @@ export class ArStudio {
 		bind(u.roomLeave, 'click', () => {
 			this._leaveRoom();
 			this._renderRoomModal();
+		});
+
+		// Transform inspector + gizmo.
+		bind(u.transformModes, 'click', (e) => {
+			const btn = e.target.closest('[data-transform-mode]');
+			if (!btn) return;
+			this._setTransformMode(btn.dataset.transformMode);
+		});
+
+		bind(u.transformFields, 'change', (e) => this._onTransformFieldChange(e));
+		bind(u.transformGround, 'click', () => this._snapSelectedToGround());
+		bind(u.transformReset, 'click', () => this._resetSelectedTransform());
+
+		this.transformControls.addEventListener('mouseDown', () => {
+			this._gizmoDragging = true;
+			this._pointer = null;
+			if (this.selected) this._gizmoStartScale = this._logicalScale(this.selected);
+		});
+
+		this.transformControls.addEventListener('objectChange', () => {
+			this._onGizmoObjectChange();
+		});
+
+		this.transformControls.addEventListener('mouseUp', () => {
+			this._gizmoDragging = false;
+			const p = this.selected;
+			if (!p) return;
+
+			p._lastNetSend = 0;
+			this._netBroadcastTransform(p);
+			this._saveScene();
+			this._warmQuickLook();
+			this._syncTransformInspector();
 		});
 
 		// Canvas gestures
@@ -478,6 +527,7 @@ export class ArStudio {
 					src: p.src,
 					title: p.title,
 					x: p.group.position.x,
+					y: p.group.position.y,
 					z: p.group.position.z,
 					yaw: p.yaw,
 					scale: this._logicalScale(p),
@@ -496,6 +546,8 @@ export class ArStudio {
 		if (!p) {
 			selbar.hidden = true;
 			this.selRing.visible = false;
+			this._detachTransformGizmo();
+			this._syncTransformInspector();
 			this._renderSceneTree();
 			this._emit('select', { placement: null });
 			return;
@@ -506,7 +558,11 @@ export class ArStudio {
 		if (p.visible !== false) {
 			this._positionSelRing();
 			this._warmQuickLook();
+			this._attachTransformGizmo(p);
+		} else {
+			this._detachTransformGizmo();
 		}
+		this._syncTransformInspector();
 		this._renderSceneTree();
 		this._emit('select', { placement: publicPlacement(p, this) });
 	}
@@ -599,7 +655,7 @@ export class ArStudio {
 	}
 
 	async _addModel({ src, title = '', poster = '' } = {}, {
-		x = null, z = null, yaw = null, scale = null, visible = true, announce = true, persist = true,
+		x = null, y = 0, z = null, yaw = null, scale = null, visible = true, announce = true, persist = true,
 		remote = false, netId = null, ownerId = null,
 	} = {}) {
 		const url = normalizeGlbUrl(src);
@@ -636,7 +692,7 @@ export class ArStudio {
 			px = spot.x;
 			pz = spot.z;
 		}
-		group.position.set(px, 0, pz);
+		group.position.set(px, Number.isFinite(Number(y)) ? Number(y) : 0, pz);
 		const yawV = yaw ?? Math.atan2(this.camera.position.x - px, this.camera.position.z - pz);
 		group.rotation.y = yawV;
 		if (scale) group.scale.setScalar(Math.min(PINCH_SCALE_MAX, Math.max(PINCH_SCALE_MIN, scale)));
@@ -747,12 +803,244 @@ export class ArStudio {
 			onAction: async () => {
 				for (const it of items) {
 					await this._addModel({ src: it.src, title: it.title }, {
-						x: it.x, z: it.z, yaw: it.yaw, scale: it.scale,
+						x: it.x, y: it.y ?? 0, z: it.z, yaw: it.yaw, scale: it.scale,
 						visible: it.visible !== false, announce: false,
 					});
 				}
 			},
 		});
+	}
+
+	// ── Transform tools ───────────────────────────────────────────────────────
+
+	_attachTransformGizmo(p) {
+		if (!this.transformControls || !p || p.visible === false || this.xrSession || !this._isMine(p)) {
+			this._detachTransformGizmo();
+			return;
+		}
+
+		this.transformControls.attach(p.group);
+		this.transformHelper.visible = true;
+		this._applyTransformModeAxes();
+	}
+
+	_detachTransformGizmo() {
+		this.transformControls?.detach();
+		if (this.transformHelper) this.transformHelper.visible = false;
+		this._gizmoDragging = false;
+	}
+
+	_setTransformMode(mode) {
+		if (!['translate', 'rotate', 'scale'].includes(mode)) return;
+
+		this._transformMode = mode;
+		this.transformControls?.setMode(mode);
+		this._applyTransformModeAxes();
+
+		for (const btn of this.ui.transformModes?.querySelectorAll('[data-transform-mode]') || []) {
+			btn.classList.toggle('is-active', btn.dataset.transformMode === mode);
+			btn.setAttribute('aria-pressed', String(btn.dataset.transformMode === mode));
+		}
+
+		this._emit('transform-mode', { mode });
+	}
+
+	_applyTransformModeAxes() {
+		const c = this.transformControls;
+		if (!c) return;
+
+		if (this._transformMode === 'translate') {
+			// Precision editor: X/Y/Z. Ordinary canvas dragging remains floor-based.
+			c.showX = true;
+			c.showY = true;
+			c.showZ = true;
+			c.setSpace('world');
+			return;
+		}
+
+		if (this._transformMode === 'rotate') {
+			// The scene format intentionally stores yaw only.
+			c.showX = false;
+			c.showY = true;
+			c.showZ = false;
+			c.setSpace('world');
+			return;
+		}
+
+		// TransformControls exposes the centre XYZ scale handle as well as the
+		// axis handles. We normalise every change back to a uniform scalar below,
+		// so even an axis drag cannot distort the model.
+		c.showX = true;
+		c.showY = true;
+		c.showZ = true;
+		c.setSpace('local');
+	}
+
+	_onGizmoObjectChange() {
+		const p = this.selected;
+		if (!p || !this._isMine(p)) return;
+
+		if (this._transformMode === 'rotate') {
+			// Only yaw belongs to the scene format.
+			p.group.rotation.x = 0;
+			p.group.rotation.z = 0;
+			p.yaw = p.group.rotation.y;
+		}
+
+		if (this._transformMode === 'scale') {
+			const axis = String(this.transformControls.axis || '');
+			let raw = p.group.scale.x;
+
+			if (axis.includes('Y')) raw = p.group.scale.y;
+			else if (axis.includes('Z')) raw = p.group.scale.z;
+
+			if (!Number.isFinite(raw)) raw = this._gizmoStartScale || 1;
+
+			const scalar = Math.min(PINCH_SCALE_MAX, Math.max(PINCH_SCALE_MIN, raw));
+			p.group.scale.setScalar(scalar);
+			p.group.userData._targetScale = scalar;
+		}
+
+		if (p.shadow) {
+			p.shadow.position.set(p.group.position.x, 0.004, p.group.position.z);
+			p.shadow.scale.setScalar(this._logicalScale(p));
+		}
+
+		this._positionSelRing();
+		this._netBroadcastTransform(p);
+		this._syncTransformInspector();
+	}
+
+	_syncTransformInspector() {
+		const panel = this.ui.transformInspector;
+		const p = this.selected;
+
+		if (!panel) return;
+
+		const usable = !!p && p.visible !== false && this._isMine(p);
+		panel.hidden = !usable;
+
+		if (!usable) return;
+
+		const set = (name, value) => {
+			const input = this.ui.transformFields?.querySelector(`[data-transform-field="${name}"]`);
+			if (input && document.activeElement !== input) input.value = value;
+		};
+
+		set('x', p.group.position.x.toFixed(3));
+		set('y', p.group.position.y.toFixed(3));
+		set('z', p.group.position.z.toFixed(3));
+		set('yaw', (p.yaw * 180 / Math.PI).toFixed(1));
+		set('scale', this._logicalScale(p).toFixed(3));
+
+		if (this.ui.transformGround) {
+			this.ui.transformGround.disabled = Math.abs(p.group.position.y) < 0.001;
+		}
+
+		for (const btn of this.ui.transformModes?.querySelectorAll('[data-transform-mode]') || []) {
+			btn.classList.toggle('is-active', btn.dataset.transformMode === this._transformMode);
+			btn.setAttribute('aria-pressed', String(btn.dataset.transformMode === this._transformMode));
+		}
+	}
+
+	_onTransformFieldChange(e) {
+		const input = e.target.closest('[data-transform-field]');
+		const p = this.selected;
+		if (!input || !p || p.visible === false || !this._isMine(p)) return;
+
+		const value = Number(input.value);
+		if (!Number.isFinite(value)) {
+			this._syncTransformInspector();
+			return;
+		}
+
+		switch (input.dataset.transformField) {
+			case 'x':
+				p.group.position.x = Math.min(50, Math.max(-50, value));
+				break;
+
+			case 'y':
+				p.group.position.y = Math.min(20, Math.max(-20, value));
+				break;
+
+			case 'z':
+				p.group.position.z = Math.min(50, Math.max(-50, value));
+				break;
+
+			case 'yaw':
+				p.yaw = value * Math.PI / 180;
+				p.group.rotation.set(0, p.yaw, 0);
+				break;
+
+			case 'scale': {
+				const scalar = Math.min(PINCH_SCALE_MAX, Math.max(PINCH_SCALE_MIN, value));
+				p.group.scale.setScalar(scalar);
+				p.group.userData._targetScale = scalar;
+				break;
+			}
+
+			default:
+				return;
+		}
+
+		if (p.shadow) {
+			p.shadow.position.set(p.group.position.x, 0.004, p.group.position.z);
+			p.shadow.scale.setScalar(this._logicalScale(p));
+		}
+
+		this._positionSelRing();
+		p._lastNetSend = 0;
+		this._netBroadcastTransform(p);
+		this._saveScene();
+		this._warmQuickLook();
+		this._syncTransformInspector();
+		this._emit('transform', { placement: publicPlacement(p, this) });
+	}
+
+	_snapSelectedToGround() {
+		const p = this.selected;
+		if (!p || p.visible === false || !this._isMine(p)) return;
+
+		p.group.position.y = 0;
+
+		if (p.shadow) {
+			p.shadow.position.set(p.group.position.x, 0.004, p.group.position.z);
+			p.shadow.scale.setScalar(this._logicalScale(p));
+		}
+
+		this._positionSelRing();
+		p._lastNetSend = 0;
+		this._netBroadcastTransform(p);
+		this._saveScene();
+		this._warmQuickLook();
+		this._syncTransformInspector();
+
+		this._setStatus('Snapped to ground.');
+		this._emit('transform', { placement: publicPlacement(p, this) });
+	}
+
+	_resetSelectedTransform() {
+		const p = this.selected;
+		if (!p || p.visible === false || !this._isMine(p)) return;
+
+		p.group.position.set(0, 0, -SPAWN_DISTANCE_M);
+		p.yaw = 0;
+		p.group.rotation.set(0, 0, 0);
+		p.group.scale.setScalar(1);
+		p.group.userData._targetScale = 1;
+
+		if (p.shadow) {
+			p.shadow.position.set(0, 0.004, -SPAWN_DISTANCE_M);
+			p.shadow.scale.setScalar(1);
+		}
+
+		this._positionSelRing();
+		p._lastNetSend = 0;
+		this._netBroadcastTransform(p);
+		this._saveScene();
+		this._warmQuickLook();
+		this._syncTransformInspector();
+		this._emit('transform', { placement: publicPlacement(p, this) });
 	}
 
 	// ── Scene tree ────────────────────────────────────────────────────────────
@@ -897,6 +1185,7 @@ export class ArStudio {
 				{ src: p.src, title: p.title },
 				{
 					x: p.group.position.x + 0.35,
+					y: p.group.position.y,
 					z: p.group.position.z + 0.35,
 					yaw: p.yaw,
 					scale: this._logicalScale(p),
@@ -940,6 +1229,7 @@ export class ArStudio {
 				src: p.src,
 				title: p.title,
 				x: p.group.position.x,
+				y: p.group.position.y,
 				z: p.group.position.z,
 				yaw: p.yaw,
 				scale: this._logicalScale(p),
@@ -999,7 +1289,7 @@ export class ArStudio {
 		}
 		for (const it of items) {
 			await this._addModel({ src: it.src, title: it.title }, {
-				x: it.x, z: it.z, yaw: it.yaw, scale: it.scale,
+				x: it.x, y: it.y ?? 0, z: it.z, yaw: it.yaw, scale: it.scale,
 				visible: it.visible !== false, announce: false, persist: false,
 			});
 		}
@@ -1284,7 +1574,10 @@ export class ArStudio {
 		if (!this.placements.length) return null;
 		this._setNdc(clientX, clientY);
 		this._raycaster.setFromCamera(this._ndc, this.camera);
-		const hits = this._raycaster.intersectObjects(this.placements.map((p) => p.group), true);
+		const hits = this._raycaster.intersectObjects(
+			this.placements.filter((p) => p.visible !== false).map((p) => p.group),
+			true,
+		);
 		if (!hits.length) return null;
 		let obj = hits[0].object;
 		while (obj) {
@@ -1303,7 +1596,7 @@ export class ArStudio {
 	}
 
 	_onPointerDown(e) {
-		if (this.xrSession) return;
+		if (this.xrSession || this._gizmoDragging || this.transformControls?.axis) return;
 		if (this._pinch.active || performance.now() - this._pinchEndedAt < 350) return;
 		this._pointer = {
 			x: e.clientX,
@@ -1317,7 +1610,7 @@ export class ArStudio {
 
 	_onPointerMove(e) {
 		const down = this._pointer;
-		if (!down || this.xrSession || this._pinch.active) return;
+		if (!down || this.xrSession || this._pinch.active || this._gizmoDragging) return;
 		const dx = e.clientX - down.x;
 		const dy = e.clientY - down.y;
 		if (Math.hypot(dx, dy) > 6) down.moved = true;
@@ -1331,7 +1624,10 @@ export class ArStudio {
 			p.group.position.x = pt.x;
 			p.group.position.z = pt.z;
 			p.shadow?.position.set(pt.x, 0.004, pt.z);
-			if (this.selected === p) this._positionSelRing();
+			if (this.selected === p) {
+				this._positionSelRing();
+				this._syncTransformInspector();
+			}
 			this._netBroadcastTransform(p);
 		} else if (!down.placement && !(this.arActive && this.gyroBase)) {
 			// Drag-look, but only when the gyro is not already steering the view.
@@ -1343,7 +1639,7 @@ export class ArStudio {
 
 	_onPointerUp(e) {
 		const down = this._pointer;
-		if (!down || this.xrSession) return;
+		if (!down || this.xrSession || this._gizmoDragging) return;
 		const wasTap = !down.moved
 			&& Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 8
 			&& !this._pinch.active
@@ -1387,6 +1683,7 @@ export class ArStudio {
 		}
 		target.yaw = this._twist.baseYaw + twistDelta(this._twist.startAngle, touchAngle(e.touches));
 		target.group.rotation.y = target.yaw;
+		this._syncTransformInspector();
 		this._netBroadcastTransform(target);
 	}
 
@@ -2366,6 +2663,7 @@ export class ArStudio {
 			});
 			this.estimatedLight.start();
 			this.ui.root.classList.add('is-xr');
+			this._detachTransformGizmo();
 			this.grid.visible = false;
 			this.scene.fog = null;
 			this.selRing.visible = false;
@@ -2447,6 +2745,8 @@ export class ArStudio {
 		}
 		this.grid.visible = !this.arActive;
 		if (!this.arActive) this.scene.fog = this._fog;
+		if (this.selected?.visible !== false) this._attachTransformGizmo(this.selected);
+		this._syncTransformInspector();
 		this._saveScene();
 		this._startLoop();
 		this._setStatus('Back to the studio view.');
@@ -2602,6 +2902,7 @@ export class ArStudio {
 	_placementShared(p) {
 		return localToShared({
 			x: p.group.position.x,
+			y: p.group.position.y,
 			z: p.group.position.z,
 			yaw: p.yaw,
 			scale: this._logicalScale(p),
@@ -3015,7 +3316,7 @@ export class ArStudio {
 		this.clear();
 		for (const it of Array.isArray(items) ? items : []) {
 			await this._addModel({ src: it.src, title: it.title }, {
-				x: it.x, z: it.z, yaw: it.yaw, scale: it.scale,
+				x: it.x, y: it.y ?? 0, z: it.z, yaw: it.yaw, scale: it.scale,
 				visible: it.visible !== false, announce: false, persist: false,
 			});
 		}
@@ -3110,6 +3411,13 @@ export class ArStudio {
 			this._onArReturn = null;
 		}
 		this._ro?.disconnect();
+
+		this._detachTransformGizmo();
+		if (this.transformHelper) this.scene.remove(this.transformHelper);
+		this.transformControls?.dispose?.();
+		this.transformControls = null;
+		this.transformHelper = null;
+
 		for (const p of [...this.placements]) this._removePlacement(p, { persist: false, broadcast: false });
 		this.shadowTex?.dispose();
 		this.selRing.geometry.dispose();
@@ -3189,6 +3497,7 @@ function publicPlacement(p, studio) {
 		src: p.src,
 		title: p.title,
 		x: p.group.position.x,
+		y: p.group.position.y,
 		z: p.group.position.z,
 		yaw: p.yaw,
 		scale: studio._logicalScale(p),

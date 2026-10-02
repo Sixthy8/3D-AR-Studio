@@ -35,6 +35,36 @@ test('a placed arrangement round-trips through the hash exactly', () => {
 	assert.deepEqual(restored[1], placements[1]);
 });
 
+test('model elevation survives scene serialization and share hashes', () => {
+	const elevated = {
+		src: 'https://a.com/floating.glb',
+		title: 'Floating',
+		x: 1.2,
+		y: 2.75,
+		z: -3.4,
+		yaw: 0.7,
+		scale: 1.1,
+	};
+
+	const restored = sceneFromHashParam(sceneToHashParam([elevated]));
+	assert.equal(restored.length, 1);
+	assert.equal(restored[0].y, 2.75);
+
+	// Old v1 scenes had no Y; they still restore on the floor.
+	const old = deserializeScene(JSON.stringify({
+		v: 1,
+		items: [{
+			src: 'https://a.com/old.glb',
+			title: 'Old',
+			x: 0,
+			z: -2,
+			yaw: 0,
+			scale: 1,
+		}],
+	}));
+	assert.equal('y' in old[0], false, 'old v1 scenes keep their original shape');
+});
+
 test('visibility round-trips without changing old visible scene payloads', () => {
 	const oldVisible = {
 		src: 'https://a.com/visible.glb',

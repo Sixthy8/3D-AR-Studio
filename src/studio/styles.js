@@ -222,6 +222,79 @@ export function studioStyles() {
 	font-size: 11.5px;
 	color: var(--ars-ink-faint);
 }
+.ars-transform-inspector {
+	padding: 12px 14px;
+	border-bottom: 1px solid var(--ars-line);
+	background: rgba(255, 255, 255, 0.025);
+}
+.ars-transform-title {
+	font-size: 11px;
+	font-weight: 750;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--ars-ink-faint);
+	margin-bottom: 9px;
+}
+.ars-transform-modes {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 5px;
+	margin-bottom: 10px;
+}
+.ars-transform-mode,
+.ars-transform-reset {
+	appearance: none;
+	border: 1px solid var(--ars-line);
+	border-radius: 9px;
+	background: rgba(255, 255, 255, 0.045);
+	color: var(--ars-ink-dim);
+	font: inherit;
+	font-size: 11px;
+	font-weight: 700;
+	padding: 7px 8px;
+	cursor: pointer;
+}
+.ars-transform-mode.is-active {
+	border-color: color-mix(in srgb, var(--ars-accent) 65%, transparent);
+	background: color-mix(in srgb, var(--ars-accent) 18%, transparent);
+	color: var(--ars-ink);
+}
+.ars-transform-fields {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 7px;
+}
+.ars-transform-field {
+	display: grid;
+	gap: 4px;
+	font-size: 10px;
+	font-weight: 650;
+	color: var(--ars-ink-faint);
+}
+.ars-transform-field input {
+	width: 100%;
+	box-sizing: border-box;
+	border: 1px solid var(--ars-line);
+	border-radius: 8px;
+	background: rgba(0, 0, 0, 0.22);
+	color: var(--ars-ink);
+	font: inherit;
+	font-size: 12px;
+	padding: 7px 8px;
+	outline: none;
+}
+.ars-transform-field input:focus {
+	border-color: var(--ars-accent);
+}
+.ars-transform-reset {
+	width: 100%;
+	margin-top: 8px;
+}
+.ars-transform-reset:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
 .ars-scene-list {
 	flex: 1 1 auto;
 	overflow-y: auto;

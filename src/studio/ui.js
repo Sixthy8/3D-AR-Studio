@@ -141,6 +141,78 @@ export function buildUI(host, cfg) {
 	]);
 
 	// ── Scene tree ────────────────────────────────────────────────────────────
+	const transformModes = el('div', {
+		class: 'ars-transform-modes',
+		role: 'group',
+		'aria-label': 'Transform mode',
+	}, [
+		el('button', {
+			type: 'button',
+			class: 'ars-transform-mode is-active',
+			'data-transform-mode': 'translate',
+			'aria-pressed': 'true',
+			text: 'Move',
+		}),
+		el('button', {
+			type: 'button',
+			class: 'ars-transform-mode',
+			'data-transform-mode': 'rotate',
+			'aria-pressed': 'false',
+			text: 'Rotate',
+		}),
+		el('button', {
+			type: 'button',
+			class: 'ars-transform-mode',
+			'data-transform-mode': 'scale',
+			'aria-pressed': 'false',
+			text: 'Scale',
+		}),
+	]);
+
+	const transformField = (label, name, step = '0.01') => el('label', {
+		class: 'ars-transform-field',
+	}, [
+		el('span', { text: label }),
+		el('input', {
+			type: 'number',
+			step,
+			'data-transform-field': name,
+			inputmode: 'decimal',
+		}),
+	]);
+
+	const transformFields = el('div', { class: 'ars-transform-fields' }, [
+		transformField('X', 'x'),
+		transformField('Y', 'y'),
+		transformField('Z', 'z'),
+		transformField('Yaw°', 'yaw', '1'),
+		transformField('Scale', 'scale', '0.05'),
+	]);
+
+	const transformGround = el('button', {
+		type: 'button',
+		class: 'ars-transform-reset',
+		text: 'Snap to ground',
+	});
+
+	const transformReset = el('button', {
+		type: 'button',
+		class: 'ars-transform-reset',
+		text: 'Reset transform',
+	});
+
+	const transformInspector = el('section', {
+		class: 'ars-transform-inspector',
+		hidden: true,
+		'aria-label': 'Transform selected model',
+	}, [
+		el('div', { class: 'ars-transform-title', text: 'Transform' }),
+		transformModes,
+		transformFields,
+		transformGround,
+		transformReset,
+	]);
+
 	const sceneList = el('div', {
 		class: 'ars-scene-list',
 		role: 'list',
@@ -166,6 +238,7 @@ export function buildUI(host, cfg) {
 			el('span', { class: 'ars-spacer' }),
 			sceneClose,
 		]),
+		transformInspector,
 		sceneList,
 	]);
 
@@ -297,6 +370,7 @@ export function buildUI(host, cfg) {
 		empty, emptyCamera, emptyAdd, emptyForge,
 		selbar, selName,
 		scenePanel, sceneList, sceneClose,
+		transformInspector, transformModes, transformFields, transformGround, transformReset,
 		tray, trayTabs, trayBody, trayClose,
 		qrModal, qrBox, qrLink, qrClose,
 		arModal, arThumb, arName, arPicker, arHint, arStatus, arGo, arScene, arXr, arQr, arClose,
