@@ -1888,6 +1888,11 @@ export class ArStudio {
 			x: e.clientX,
 			y: e.clientY,
 			placement: this._placementAt(e.clientX, e.clientY),
+
+			// Capture modifier state at pointer-down so a click remains deterministic
+			// even if a key is released before pointer-up.
+			multiSelect: Boolean(e.shiftKey || e.ctrlKey || e.metaKey),
+
 			lookYaw: this.cameraYaw,
 			lookPitch: this.cameraPitch,
 			moved: false,
@@ -1931,7 +1936,11 @@ export class ArStudio {
 			&& !this._pinch.active
 			&& performance.now() - this._pinchEndedAt >= 350;
 		if (wasTap) {
-			this._select(down.placement); // null deselects
+			if (down.placement && down.multiSelect) {
+				this._toggleSelection(down.placement);
+			} else {
+				this._select(down.placement); // null deselects
+			}
 		} else if (down.placement && down.moved && this._isMine(down.placement)) {
 			down.placement._lastNetSend = 0; // force the settle broadcast through
 			this._netBroadcastTransform(down.placement);
