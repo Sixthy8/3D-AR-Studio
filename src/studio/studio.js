@@ -5815,7 +5815,7 @@ export class ArStudio {
 		return items;
 	}
 
-	/** The current arrangement as plain data: `[{ src, title, x, z, yaw, scale }]`. */
+	/** The current arrangement as plain data, including every persisted transform axis. */
 	getScene() {
 		return this.placements.map((p) => ({
 			src: p.src,
@@ -5823,7 +5823,9 @@ export class ArStudio {
 			x: p.group.position.x,
 			y: p.group.position.y,
 			z: p.group.position.z,
+			rotX: p.rotX,
 			yaw: p.yaw,
+			rotZ: p.rotZ,
 			scale: this._logicalScale(p),
 			visible: p.visible !== false,
 			...(p.groupId ? { group: p.groupId } : {}),
@@ -5833,31 +5835,119 @@ export class ArStudio {
 
 	/** Replace the scene with an arrangement in the shape `getScene()` returns. */
 	async setScene(items) {
-		this.clear();
-		for (const it of Array.isArray(items) ? items : []) {
-			await this._addModel({ src: it.src, title: it.title }, {
-				x: it.x, y: it.y ?? 0, z: it.z,
-				rotX: it.rotX ?? 0,
-				yaw: it.yaw,
-				rotZ: it.rotZ ?? 0,
-				scale: it.scale,
-				visible: it.visible !== false,
-				groupId: it.group || null,
-				action: it.action || null,
-				announce: false,
-				persist: false,
-			});
-		}
-		this._saveScene();
+		const document = JSON.parse(serializeScene(
+			Array.isArray(items) ? items : [],
+			this._sceneMetadata(),
+		));
+
+		await this.setSceneDocument(document);
 	}
 
-	/** Full scene document, including optional marker metadata. */
+	/** Canonical v1 scene document, including optional marker metadata. */
 	getSceneDocument() {
-		return {
-			v: 1,
-			...this._sceneMetadata(),
-			items: this.getScene(),
-		};
+		return JSON.parse(serializeScene(
+			this.getScene(),
+			this._sceneMetadata(),
+		));
+	}
+
+	/**
+	 * Replace the complete authored v1 document.
+	 *
+	 * Every unique model is loaded before the current live scene is touched. If a
+	 * later installation step unexpectedly fails, the previous canonical document
+	 * is restored before the rejection reaches the caller.
+	 */
+	async setSceneDocument(document) {
+		let parsed;
+
+		try {
+			parsed = typeof document === 'string'
+				? JSON.parse(document)
+				: JSON.parse(JSON.stringify(document));
+		} catch (err) {
+			throw new TypeError('ar-studio: invalid scene document JSON', { cause: err });
+		}
+
+		if (!parsed || parsed.v !== 1 || !Array.isArray(parsed.items)) {
+			throw new TypeError('ar-studio: expected a v1 scene document');
+		}
+
+		const normalized = deserializeSceneDocument(JSON.stringify(parsed));
+		const sources = [...new Set(normalized.items.map((item) => item.src))];
+
+		try {
+			await Promise.all(sources.map((src) => this._loadTemplate(src)));
+		} catch (err) {
+			log.warn('scene document preload failed', err);
+			this._setStatus(
+				"Couldn't restore that scene: one or more models could not be loaded.",
+				{ warn: true },
+			);
+			throw new Error('ar-studio: scene document assets could not be loaded', { cause: err });
+		}
+
+		const previous = this.getSceneDocument();
+
+		try {
+			await this._installSceneDocument(normalized);
+		} catch (err) {
+			log.warn('scene document installation failed; restoring previous scene', err);
+
+			try {
+				const rollback = deserializeSceneDocument(JSON.stringify(previous));
+				await this._installSceneDocument(rollback);
+			} catch (rollbackError) {
+				log.error('scene document rollback failed', rollbackError);
+			}
+
+			throw err;
+		}
+
+		return this.getSceneDocument();
+	}
+
+	async _installSceneDocument(documentData) {
+		this.clear();
+
+		this.sceneType = normalizeSceneType(documentData.type);
+		this.sceneTarget = normalizeSceneTarget(
+			documentData.target,
+			this.sceneType,
+		);
+
+		if (this.sceneType !== 'free' && !this.sceneTarget) {
+			this.sceneTarget = this._defaultSceneTarget(this.sceneType);
+		}
+
+		this._syncTargetPreview();
+		this._syncSceneSetupUI();
+
+		for (const it of documentData.items) {
+			const placement = await this._addModel(
+				{ src: it.src, title: it.title },
+				{
+					x: it.x,
+					y: it.y ?? 0,
+					z: it.z,
+					rotX: it.rotX ?? 0,
+					yaw: it.yaw,
+					rotZ: it.rotZ ?? 0,
+					scale: it.scale,
+					visible: it.visible !== false,
+					groupId: it.group || null,
+					action: it.action || null,
+					announce: false,
+					persist: false,
+				},
+			);
+
+			if (!placement) {
+				throw new Error(`ar-studio: could not restore model ${it.src}`);
+			}
+		}
+
+		this._saveScene();
 	}
 
 	/** A link that reopens this exact arrangement, models and transforms included. */

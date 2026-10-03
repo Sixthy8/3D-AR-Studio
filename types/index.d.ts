@@ -30,9 +30,41 @@ export interface SceneItem {
 	src: string;
 	title: string;
 	x: number;
+	y?: number;
 	z: number;
+	rotX?: number;
 	yaw: number;
+	rotZ?: number;
 	scale: number;
+	visible?: boolean;
+	group?: string;
+	action?: SceneAction;
+}
+
+export interface SceneAction {
+	id: string;
+	type: 'link';
+	label?: string;
+	url: string;
+}
+
+export type SceneType = 'free' | 'marker-horizontal' | 'marker-vertical';
+
+export interface SceneTarget {
+	id: string;
+	image?: string;
+	mind?: string;
+	width: number;
+	height: number;
+	orientation: 'horizontal' | 'vertical';
+	visible?: boolean;
+}
+
+export interface SceneDocument {
+	v: 1;
+	type?: SceneType;
+	target?: SceneTarget | null;
+	items: SceneItem[];
 }
 
 export interface AssetItem {
@@ -123,6 +155,8 @@ export declare class ArStudio {
 	clear(): SceneItem[];
 	getScene(): SceneItem[];
 	setScene(items: SceneItem[]): Promise<void>;
+	getSceneDocument(): SceneDocument;
+	setSceneDocument(document: SceneDocument | string): Promise<SceneDocument>;
 	shareUrl(): string;
 	generate(prompt: string): Promise<GeneratedModel | null>;
 	viewInYourSpace(src: string, title?: string): string;
