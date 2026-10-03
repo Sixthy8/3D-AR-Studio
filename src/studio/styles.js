@@ -58,6 +58,144 @@ export function studioStyles() {
 .ars-hud .ars-top, .ars-hud .ars-dock, .ars-hud .ars-selbar,
 .ars-hud .ars-scene-panel, .ars-hud .ars-tray, .ars-hud .ars-modal { pointer-events: auto; }
 
+/* ── Published experience chrome ── */
+.ars-runtime-chrome {
+	position: absolute;
+	inset: 0;
+	z-index: 13;
+	pointer-events: none;
+}
+
+.ars-runtime-brand {
+	position: absolute;
+	top: calc(env(safe-area-inset-top, 0px) + 18px);
+	left: 18px;
+	z-index: 2;
+	pointer-events: none;
+}
+
+.ars-runtime-logo {
+	display: block;
+	width: min(132px, 30vw);
+	height: auto;
+	max-height: 54px;
+	object-fit: contain;
+	object-position: left center;
+	opacity: 0.82;
+	filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.28));
+}
+
+.ars-runtime-controls {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 12px;
+	padding: 0 18px;
+	pointer-events: none;
+}
+
+.ars-runtime-primary,
+.ars-runtime-photo {
+	appearance: none;
+	cursor: pointer;
+	font: inherit;
+	font-weight: 700;
+	color: #fff;
+	background: rgba(10, 12, 18, 0.76);
+	border: 1px solid rgba(255, 255, 255, 0.22);
+	box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28);
+	backdrop-filter: blur(14px);
+	pointer-events: auto;
+}
+
+.ars-runtime-primary {
+	min-height: 48px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 9px;
+	border-radius: 999px;
+	padding: 12px 20px;
+	font-size: 14px;
+}
+
+.ars-runtime-photo {
+	width: 48px;
+	height: 48px;
+	display: grid;
+	place-items: center;
+	border-radius: 50%;
+	font-size: 14px;
+}
+
+.ars-runtime-primary:hover,
+.ars-runtime-photo:hover {
+	background: rgba(22, 25, 34, 0.88);
+	border-color: rgba(255, 255, 255, 0.36);
+}
+
+.ars-runtime-primary:active,
+.ars-runtime-photo:active {
+	transform: translateY(1px);
+}
+
+.ars-runtime-primary[disabled],
+.ars-runtime-photo[disabled] {
+	opacity: 0.42;
+	cursor: not-allowed;
+}
+
+.ars-runtime-primary-icon {
+	color: var(--ars-accent-ink);
+}
+
+.ars-root.is-experience .ars-top,
+.ars-root.is-experience .ars-empty,
+.ars-root.is-experience .ars-chip,
+.ars-root.is-experience .ars-selbar,
+.ars-root.is-experience .ars-scene-panel,
+.ars-root.is-experience .ars-dock,
+.ars-root.is-experience .ars-tray {
+	display: none !important;
+}
+
+.ars-root.is-experience .ars-status {
+	bottom: calc(env(safe-area-inset-bottom, 0px) + 82px);
+	max-width: min(88vw, 520px);
+}
+
+@media (max-width: 520px) {
+	.ars-runtime-brand {
+		top: calc(env(safe-area-inset-top, 0px) + 14px);
+		left: 14px;
+	}
+
+	.ars-runtime-logo {
+		width: min(108px, 32vw);
+	}
+
+	.ars-runtime-controls {
+		bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+		gap: 10px;
+		padding: 0 14px;
+	}
+
+	.ars-runtime-primary {
+		min-height: 46px;
+		padding: 11px 17px;
+		font-size: 13.5px;
+	}
+
+	.ars-runtime-photo {
+		width: 46px;
+		height: 46px;
+	}
+}
+
 /* ── Top bar ── */
 .ars-top {
 	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -851,6 +989,82 @@ export function studioStyles() {
 	color: var(--ars-accent-ink); font-variant-numeric: tabular-nums;
 }
 .ars-link-out { font-size: 12px; color: var(--ars-ink-faint); word-break: break-all; }
+
+/* ── Export / publish sheet ── */
+.ars-export-sheet {
+	width: min(520px, 100%);
+	gap: 14px;
+}
+.ars-export-options {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+	width: 100%;
+}
+.ars-export-card {
+	min-width: 0;
+	display: flex;
+	align-items: flex-start;
+	gap: 11px;
+	padding: 14px;
+	text-align: left;
+	text-decoration: none;
+	color: var(--ars-ink);
+	background: rgba(255, 255, 255, 0.055);
+	border: 1px solid var(--ars-line);
+	border-radius: 14px;
+	transition: background 0.15s, border-color 0.15s, transform 0.08s;
+}
+.ars-export-card:hover {
+	background: rgba(255, 255, 255, 0.1);
+	border-color: color-mix(in srgb, var(--ars-accent) 48%, transparent);
+	transform: translateY(-1px);
+}
+.ars-export-card:active { transform: none; }
+.ars-export-icon {
+	flex: 0 0 auto;
+	width: 34px;
+	height: 34px;
+	display: grid;
+	place-items: center;
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--ars-accent) 17%, transparent);
+	color: var(--ars-accent-ink);
+	font-size: 17px;
+}
+.ars-export-copy {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+.ars-export-copy strong {
+	font-size: 13.5px;
+	line-height: 1.25;
+}
+.ars-export-copy small {
+	font-size: 11.5px;
+	line-height: 1.45;
+	color: var(--ars-ink-dim);
+}
+.ars-export-card.is-disabled {
+	opacity: 0.42;
+	cursor: not-allowed;
+	pointer-events: none;
+}
+.ars-export-note {
+	font-size: 11.5px !important;
+	color: var(--ars-warn) !important;
+}
+.ars-export-sheet > .ars-btn {
+	min-width: 92px;
+}
+
+@media (max-width: 520px) {
+	.ars-export-options {
+		grid-template-columns: 1fr;
+	}
+}
 
 /* ── AR hand-off sheet ── */
 .ars-ar-sheet { gap: 14px; }

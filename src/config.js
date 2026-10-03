@@ -80,6 +80,7 @@ export const DEFAULTS = {
 		backHref: null,
 		backLabel: 'Back',
 		accent: '#8b7cf8',
+		logo: 'https://sixty8inc.com/wp-content/uploads/2026/08/sixty8inc_logo-02.png',
 	},
 	/** Base URL that share links + QR codes point at. Defaults to the page itself. */
 	shareBaseUrl: '',
@@ -131,7 +132,7 @@ export function safeUrl(raw) {
  *
  * @param {object} [options]
  * @param {URLSearchParams|string} [search] Page query string (defaults to location.search).
- * @returns {object} config, plus `urlModels` / `urlRoom` / `urlPrompt` read from the URL.
+ * @returns {object} config, plus URL-derived models, room, prompt, and experience.
  */
 export function resolveConfig(options = {}, search) {
 	const cfg = mergeConfig(DEFAULTS, options);
@@ -146,6 +147,7 @@ export function resolveConfig(options = {}, search) {
 	const urlModels = [];
 	let urlRoom = '';
 	let urlPrompt = '';
+	let urlExperience = '';
 
 	if (cfg.allowUrlOverride) {
 		const assets = params.get('assets') || params.get('source');
@@ -160,11 +162,16 @@ export function resolveConfig(options = {}, search) {
 		}
 		urlRoom = String(params.get('room') || '').trim();
 		urlPrompt = String(params.get('forge') || params.get('prompt') || '').trim();
+
+		const experience = String(params.get('experience') || '').trim().toLowerCase();
+		if (experience === 'space' || experience === 'marker') {
+			urlExperience = experience;
+		}
 	}
 
 	if (!cfg.shareBaseUrl && typeof location !== 'undefined') {
 		cfg.shareBaseUrl = `${location.origin}${location.pathname}`;
 	}
 
-	return { ...cfg, urlModels, urlRoom, urlPrompt };
+	return { ...cfg, urlModels, urlRoom, urlPrompt, urlExperience };
 }

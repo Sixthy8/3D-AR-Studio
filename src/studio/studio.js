@@ -97,6 +97,13 @@ export class ArStudio {
 		this.ui = buildUI(host, this.config);
 		if (this.config.fullscreen ?? (host === document.body)) this.ui.root.classList.add('is-fullscreen');
 
+		if (this.config.urlExperience) {
+			this.ui.root.classList.add(
+				'is-experience',
+				`is-experience-${this.config.urlExperience}`,
+			);
+		}
+
 		this._initScene();
 		this._initState();
 		this._wireUI();
@@ -365,9 +372,17 @@ export class ArStudio {
 
 		bind(u.clearBtn, 'click', () => this._clearWithUndo());
 		bind(u.photoBtn, 'click', () => this._capturePhoto());
+		bind(u.runtimePhotoBtn, 'click', () => this._capturePhoto());
+		bind(u.runtimePrimary, 'click', () => this._onRuntimePrimary());
 		bind(u.qrBtn, 'click', () => this._openQr());
 		bind(u.qrClose, 'click', () => this._closeQr());
 		bind(u.qrModal, 'click', (e) => { if (e.target === u.qrModal) this._closeQr(); });
+
+		bind(u.exportBtn, 'click', () => this._openExport());
+		bind(u.exportClose, 'click', () => this._closeExport());
+		bind(u.exportModal, 'click', (e) => {
+			if (e.target === u.exportModal) this._closeExport();
+		});
 
 		bind(u.arClose, 'click', () => this._closeArSheet());
 		bind(u.arModal, 'click', (e) => { if (e.target === u.arModal) this._closeArSheet(); });
@@ -575,13 +590,105 @@ export class ArStudio {
 		if (!coarse && this.ui.qrBtn) this.ui.qrBtn.hidden = false;
 
 		const bootRoom = normalizeRoomCode(this.config.urlRoom || '');
-		this._restoreScene({ skipLocal: !!bootRoom }).then(() => {
+		this._restoreScene({ skipLocal: !!bootRoom }).then(async () => {
 			if (bootRoom) this._joinRoom(bootRoom);
 			if (this.config.urlPrompt && this.config.urlPrompt.length >= 3 && this.ui.forgeInput) {
 				this.ui.forgeInput.value = this.config.urlPrompt;
 				this._startForge(this.config.urlPrompt);
 			}
+
+			await this._activateExperienceMode();
 		});
+	}
+
+	async _activateExperienceMode() {
+		const mode = this.config.urlExperience;
+
+		if (mode !== 'space' && mode !== 'marker') return;
+
+		// Published experiences are viewers, not editors. Remove editor-only
+		// selection state and helpers without touching authored scene transforms.
+		this._dropRuntimeGroup();
+		this._selection.clear();
+		this.selected = null;
+		this.selRing.visible = false;
+		this._detachTransformGizmo();
+
+		if (this.targetPreview?.mesh) {
+			this.targetPreview.mesh.visible = false;
+		}
+
+		// Keep exported previews clean: the editor grid/fog are authoring aids.
+		this.grid.visible = false;
+		this.scene.fog = null;
+
+		this._syncRuntimeControls();
+
+		if (mode === 'space') {
+			this._setStatus('Ready to place in your space.');
+			return;
+		}
+
+		const markerReady =
+			(this.sceneType === 'marker-horizontal' ||
+			this.sceneType === 'marker-vertical') &&
+			Boolean(this.sceneTarget?.mind);
+
+		if (!markerReady) {
+			this._setStatus(
+				'This Marker AR link does not contain a compiled marker target.',
+				{ warn: true, sticky: true },
+			);
+			if (this.ui.runtimePrimary) this.ui.runtimePrimary.disabled = true;
+			return;
+		}
+
+		// Published Marker AR waits for an explicit user gesture before requesting
+		// camera permission. This keeps the landing experience calm and makes the
+		// browser permission prompt a direct consequence of tapping Start Marker AR.
+		this._setStatus('Tap Start Marker AR to begin.');
+		this._syncRuntimeControls();
+	}
+
+	_syncRuntimeControls() {
+		const mode = this.config.urlExperience;
+		const btn = this.ui.runtimePrimary;
+		const label = btn?.querySelector('.ars-runtime-primary-label');
+
+		if (!btn || !label) return;
+
+		if (mode === 'marker') {
+			btn.disabled = false;
+			label.textContent = this.arActive
+				? 'Stop camera'
+				: 'Start Marker AR';
+			btn.setAttribute(
+				'aria-label',
+				this.arActive
+					? 'Stop the marker camera'
+					: 'Start marker augmented reality',
+			);
+		} else if (mode === 'space') {
+			btn.disabled = this.placements.length === 0;
+			label.textContent = 'Place in your space';
+			btn.setAttribute('aria-label', 'Place this scene in your space');
+		}
+	}
+
+	_onRuntimePrimary() {
+		if (this.config.urlExperience === 'space') {
+			this._enterAR();
+			return;
+		}
+
+		if (this.config.urlExperience === 'marker') {
+			if (this.arActive) {
+				this._stopCamera();
+				this._setStatus('Camera stopped.');
+			} else {
+				this._startCamera();
+			}
+		}
 	}
 
 	// ── Status + counters ─────────────────────────────────────────────────────
@@ -609,7 +716,13 @@ export class ArStudio {
 
 	_updateCount() {
 		const n = this.placements.length;
-		const { count, clearBtn, empty, photoBtn } = this.ui;
+		const {
+			count,
+			clearBtn,
+			empty,
+			photoBtn,
+			runtimePhotoBtn,
+		} = this.ui;
 		if (count) {
 			if (this.net && this.net.status === 'online' && this._presence.count > 1) {
 				count.textContent = `${this._presence.count} here · ${n} ${n === 1 ? 'model' : 'models'}`;
@@ -622,6 +735,8 @@ export class ArStudio {
 		if (clearBtn) clearBtn.hidden = n === 0;
 		if (empty) empty.hidden = n > 0;
 		if (photoBtn) photoBtn.disabled = n === 0;
+		if (runtimePhotoBtn) runtimePhotoBtn.disabled = n === 0;
+		this._syncRuntimeControls();
 		// Scene setup exists independently of placements. An empty marker scene is
 		// still a valid document, so the Scene panel must always remain reachable.
 		if (this.ui.sceneBtn) this.ui.sceneBtn.hidden = false;
@@ -3273,6 +3388,7 @@ export class ArStudio {
 				this._setStatus('Camera on: your models are in the room. Look around.');
 			}
 			this._emit('camera', { active: true });
+			this._syncRuntimeControls();
 		} finally {
 			this.arTransitioning = false;
 		}
@@ -3293,8 +3409,14 @@ export class ArStudio {
 		root?.classList.remove('is-ar');
 		cameraBtn?.classList.remove('is-active');
 		cameraBtn?.setAttribute('aria-pressed', 'false');
-		this.grid.visible = !this.xrSession;
-		if (!this.xrSession) this.scene.fog = this._fog;
+		this.grid.visible =
+			!this.xrSession &&
+			!this.config.urlExperience;
+		if (!this.xrSession) {
+			this.scene.fog = this.config.urlExperience
+				? null
+				: this._fog;
+		}
 		this.camera.fov = 58;
 		this.camera.updateProjectionMatrix();
 		this.gyroBase = null;
@@ -3302,6 +3424,7 @@ export class ArStudio {
 		this.arTrackW = 0;
 		this.arTrackH = 0;
 		if (was) this._emit('camera', { active: false });
+		this._syncRuntimeControls();
 		this._framePreview();
 	}
 
@@ -4798,7 +4921,74 @@ export class ArStudio {
 		this._emit('xr', { active: false });
 	}
 
-	// ── Photo + QR ────────────────────────────────────────────────────────────
+	// ── Photo + export + QR ──────────────────────────────────────────────────
+
+	_experienceUrl(mode) {
+		const normalized =
+			mode === 'marker'
+				? 'marker'
+				: 'space';
+
+		const url = new URL(this.shareUrl(), location.href);
+		url.searchParams.set('experience', normalized);
+		return url.href;
+	}
+
+	_openExport() {
+		const {
+			exportModal,
+			exportSpaceLink,
+			exportMarkerLink,
+			exportMarkerNote,
+		} = this.ui;
+
+		if (!exportModal) return;
+
+		this._lastFocus = document.activeElement;
+
+		if (exportSpaceLink) {
+			exportSpaceLink.href = this._experienceUrl('space');
+		}
+
+		const markerReady =
+			(this.sceneType === 'marker-horizontal' ||
+			this.sceneType === 'marker-vertical') &&
+			Boolean(this.sceneTarget?.mind);
+
+		if (exportMarkerLink) {
+			exportMarkerLink.href = markerReady
+				? this._experienceUrl('marker')
+				: '#';
+			exportMarkerLink.setAttribute(
+				'aria-disabled',
+				markerReady ? 'false' : 'true',
+			);
+			exportMarkerLink.classList.toggle('is-disabled', !markerReady);
+			exportMarkerLink.tabIndex = markerReady ? 0 : -1;
+		}
+
+		if (exportMarkerNote) {
+			exportMarkerNote.hidden = markerReady;
+		}
+
+		exportModal.hidden = false;
+		this.ui.exportClose?.focus?.();
+
+		this._emit('export-open', {
+			spaceUrl: this._experienceUrl('space'),
+			markerUrl: markerReady ? this._experienceUrl('marker') : '',
+		});
+	}
+
+	_closeExport() {
+		const { exportModal, exportBtn } = this.ui;
+		if (!exportModal || exportModal.hidden) return;
+
+		const hadFocus = exportModal.contains(document.activeElement);
+		exportModal.hidden = true;
+
+		if (hadFocus) this._restoreFocus(exportBtn);
+	}
 
 	async _capturePhoto() {
 		this.renderer.render(this.scene, this.camera); // fresh pixels under preserveDrawingBuffer

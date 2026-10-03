@@ -60,6 +60,72 @@ export function buildUI(host, cfg) {
 	const video = el('video', { class: 'ars-video', playsinline: true, muted: true, 'aria-hidden': 'true' });
 	const canvas = el('canvas', { class: 'ars-canvas' });
 
+	// ── Published experience chrome ──────────────────────────────────────────
+	const experienceMode =
+		cfg.urlExperience === 'space' || cfg.urlExperience === 'marker'
+			? cfg.urlExperience
+			: '';
+
+	const runtimeBrand = el('div', {
+		class: 'ars-runtime-brand',
+		hidden: !experienceMode,
+	}, [
+		t.logo
+			? el('img', {
+				class: 'ars-runtime-logo',
+				src: t.logo,
+				alt: t.title || 'Sixty8',
+			})
+			: el('span', { text: t.title || 'Sixty8' }),
+	]);
+
+	const runtimePrimary = el('button', {
+		type: 'button',
+		class: 'ars-runtime-primary',
+		hidden: !experienceMode,
+		'aria-label': experienceMode === 'marker'
+			? 'Start marker augmented reality'
+			: 'Place this scene in your space',
+	}, [
+		el('span', {
+			class: 'ars-runtime-primary-icon',
+			'aria-hidden': 'true',
+			text: experienceMode === 'marker' ? '⌗' : '⬡',
+		}),
+		el('span', {
+			class: 'ars-runtime-primary-label',
+			text: experienceMode === 'marker'
+				? 'Start Marker AR'
+				: 'Place in your space',
+		}),
+	]);
+
+	const runtimePhotoBtn = el('button', {
+		type: 'button',
+		class: 'ars-runtime-photo',
+		hidden: !experienceMode,
+		disabled: true,
+		'aria-label': 'Take a screenshot',
+	}, [
+		el('span', { 'aria-hidden': 'true', text: '●' }),
+	]);
+
+	const runtimeControls = el('div', {
+		class: 'ars-runtime-controls',
+		hidden: !experienceMode,
+	}, [
+		runtimePrimary,
+		runtimePhotoBtn,
+	]);
+
+	const runtimeChrome = el('div', {
+		class: 'ars-runtime-chrome',
+		hidden: !experienceMode,
+	}, [
+		runtimeBrand,
+		runtimeControls,
+	]);
+
 	// ── Top bar ──────────────────────────────────────────────────────────────
 	const back = t.backHref
 		? el('a', { class: 'ars-back', href: t.backHref }, [el('span', { 'aria-hidden': 'true', text: '←' }), t.backLabel || 'Back'])
@@ -75,6 +141,15 @@ export function buildUI(host, cfg) {
 	}, [
 		el('span', { 'aria-hidden': 'true', text: '▤' }),
 		'Scene',
+	]);
+
+	const exportBtn = el('button', {
+		type: 'button',
+		class: 'ars-icon-btn ars-export-btn',
+		'aria-label': 'Export this scene as an AR experience',
+	}, [
+		el('span', { 'aria-hidden': 'true', text: '↗' }),
+		'Export',
 	]);
 	const roomBtn = canRoom
 		? el('button', { type: 'button', class: 'ars-icon-btn', 'aria-label': 'Open a shared room so other people can build in this scene with you' }, [
@@ -99,7 +174,7 @@ export function buildUI(host, cfg) {
 	]);
 
 	const top = el('div', { class: 'ars-top' }, [
-		back, title, count, sceneBtn,
+		back, title, count, sceneBtn, exportBtn,
 		el('span', { class: 'ars-spacer' }),
 		roomBtn, qrBtn, xrBtn, cameraBtn,
 	]);
@@ -535,6 +610,68 @@ export function buildUI(host, cfg) {
 		]),
 	]);
 
+	// ── Export / publish dialog ──────────────────────────────────────────────
+	const exportSpaceLink = el('a', {
+		class: 'ars-export-card',
+		target: '_blank',
+		rel: 'noopener',
+	}, [
+		el('span', { class: 'ars-export-icon', 'aria-hidden': 'true', text: '⬡' }),
+		el('span', { class: 'ars-export-copy' }, [
+			el('strong', { text: 'Place in Your Space' }),
+			el('small', {
+				text: 'Publish a clean experience focused on placing the scene in the viewer’s real environment.',
+			}),
+		]),
+	]);
+
+	const exportMarkerLink = el('a', {
+		class: 'ars-export-card',
+		target: '_blank',
+		rel: 'noopener',
+	}, [
+		el('span', { class: 'ars-export-icon', 'aria-hidden': 'true', text: '⌗' }),
+		el('span', { class: 'ars-export-copy' }, [
+			el('strong', { text: 'Marker AR' }),
+			el('small', {
+				text: 'Publish a camera-first experience that tracks the scene from its image marker.',
+			}),
+		]),
+	]);
+
+	const exportMarkerNote = el('p', {
+		class: 'ars-export-note',
+		hidden: true,
+		text: 'Marker AR requires a marker scene with a compiled target image.',
+	});
+
+	const exportClose = el('button', {
+		type: 'button',
+		class: 'ars-btn',
+		text: 'Done',
+	});
+
+	const exportModal = el('div', {
+		class: 'ars-modal',
+		hidden: true,
+		role: 'dialog',
+		'aria-modal': 'true',
+		'aria-label': 'Export AR experience',
+	}, [
+		el('div', { class: 'ars-dialog ars-export-sheet' }, [
+			el('h2', { text: 'Export experience' }),
+			el('p', {
+				text: 'Publish the same authored scene as a purpose-built AR experience.',
+			}),
+			el('div', { class: 'ars-export-options' }, [
+				exportSpaceLink,
+				exportMarkerLink,
+			]),
+			exportMarkerNote,
+			exportClose,
+		]),
+	]);
+
 	// ── AR hand-off sheet ────────────────────────────────────────────────────
 	// The one screen between "I want this in my room" and the device's own AR
 	// viewer. It exists because that hand-off is not instant on iOS: the GLB has
@@ -602,7 +739,9 @@ export function buildUI(host, cfg) {
 	]);
 
 	const hud = el('div', { class: 'ars-hud' }, [
-		top, empty, status, chip, selbar, scenePanel, dock, tray, qrModal, arModal, roomModal,
+		runtimeChrome,
+		top, empty, status, chip, selbar, scenePanel, dock, tray,
+		qrModal, exportModal, arModal, roomModal,
 	]);
 	const root = el('div', { class: 'ars-root' }, [video, canvas, hud]);
 	if (t.accent) root.style.setProperty('--ars-accent', t.accent);
@@ -619,7 +758,8 @@ export function buildUI(host, cfg) {
 
 	return {
 		root, video, canvas, hud, top, title, count, status, chip,
-		cameraBtn, xrBtn, qrBtn, roomBtn, sceneBtn, addBtn, photoBtn, clearBtn,
+		runtimeChrome, runtimeBrand, runtimePrimary, runtimePhotoBtn,
+		cameraBtn, xrBtn, qrBtn, roomBtn, sceneBtn, exportBtn, addBtn, photoBtn, clearBtn,
 		forgeForm: canGenerate ? forgeForm : null, forgeInput: canGenerate ? forgeInput : null, forgeGo: canGenerate ? forgeGo : null,
 		empty, emptyCamera, emptyAdd, emptyForge,
 		selbar, selName,
@@ -635,6 +775,7 @@ export function buildUI(host, cfg) {
 		transformGroupActions, groupVisibility, groupUngroup,
 		tray, trayTabs, trayBody, trayClose,
 		qrModal, qrBox, qrLink, qrClose,
+		exportModal, exportSpaceLink, exportMarkerLink, exportMarkerNote, exportClose,
 		arModal, arThumb, arName, arPicker, arHint, arStatus, arGo, arScene, arXr, arQr, arClose,
 		roomModal, roomIdle, roomLive, roomCreate, roomJoinForm, roomJoinInput,
 		roomCode, roomPresence, roomQr, roomCopy, roomLeave, roomClose,
