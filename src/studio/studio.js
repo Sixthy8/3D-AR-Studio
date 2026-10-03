@@ -25,7 +25,7 @@
 
 import {
 	AnimationMixer, Box3, CanvasTexture, Color, DirectionalLight, Fog, GridHelper, Group,
-	HemisphereLight, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry,
+	HemisphereLight, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry,
 	Raycaster, RingGeometry, Scene, TextureLoader, Vector2, Vector3,
 	WebGLRenderer, WebGLRenderTarget,
 } from 'three';
@@ -44,6 +44,7 @@ import { applyCinematicDefaults, detectQualityTier, loadEnvironment } from './re
 import { buildUI, el } from './ui.js';
 import { EstimatedLighting } from './estimated-lighting.js';
 import { MultiPlaceSession } from './multi-place.js';
+import { MarkerTracker } from './marker-tracker.js';
 import { createLoadQueue } from './load-queue.js';
 import { sharedGLTFLoader } from './loaders.js';
 import { mountIdle } from './idle.js';
@@ -230,6 +231,15 @@ export class ArStudio {
 		this._runtimeGroup = null;
 		this.arActive = false;
 		this.mediaStream = null;
+		this.markerTracker = null;
+
+		// Runtime-only MindAR proof objects. Authored placement transforms remain
+		// untouched; this layer exists only while live marker tracking is active.
+		this.markerPoseRoot = null;
+		this.markerContentRoot = null;
+		this.markerPostMatrix = null;
+		this._markerCameraRestore = null;
+
 		this.arTransitioning = false;
 		this.xrSession = null;
 		this.estimatedLight = null;
@@ -1289,13 +1299,21 @@ export class ArStudio {
 		group.rotation.set(rotXV, yawV, rotZV);
 		if (scale) group.scale.setScalar(Math.min(PINCH_SCALE_MAX, Math.max(PINCH_SCALE_MIN, scale)));
 		group.visible = visible !== false;
-		this.scene.add(group);
+
+		if (this.markerContentRoot) {
+			this.markerContentRoot.add(group);
+		} else {
+			this.scene.add(group);
+		}
 
 		const shadow = this._makeShadow(tpl.radius);
 		if (shadow) {
 			shadow.position.set(px, 0.004, pz);
 			shadow.scale.setScalar(group.scale.x);
-			shadow.visible = visible !== false && !this.xrSession; // hidden models have no preview shadow
+			shadow.visible =
+				visible !== false &&
+				!this.xrSession &&
+				!this.markerContentRoot;
 			this.scene.add(shadow);
 		}
 
@@ -1373,9 +1391,9 @@ export class ArStudio {
 		p.idle?.detach();
 		p.idle = null;
 		this.xrSession?.release(p.group);
-		this.scene.remove(p.group);
+		p.group.removeFromParent();
 		if (p.shadow) {
-			this.scene.remove(p.shadow);
+			p.shadow.removeFromParent();
 			p.shadow.geometry?.dispose();
 			p.shadow.material?.dispose();
 		}
@@ -2801,6 +2819,381 @@ export class ArStudio {
 		this.sun.color.setHex(0xffffff);
 	}
 
+	_createMarkerPoseProof(tracker) {
+		this._disposeMarkerPoseProof();
+
+		const dims = tracker?.targetDimensions;
+
+		if (
+			!Array.isArray(dims) ||
+			dims.length < 2 ||
+			!(dims[0] > 0) ||
+			!(dims[1] > 0)
+		) {
+			throw new Error('MindAR target dimensions are unavailable');
+		}
+
+		const physicalWidth = Number(this.sceneTarget?.width);
+
+		if (!(physicalWidth > 0)) {
+			throw new Error('marker target physical width is unavailable');
+		}
+
+		const [markerWidth, markerHeight] = dims;
+
+		// MindAR's official Three adapter converts its pixel-coordinate pose into
+		// a centre-origin frame where one child-space unit equals one target width.
+		this.markerPostMatrix = new Matrix4()
+			.makeScale(markerWidth, markerWidth, markerWidth);
+
+		this.markerPostMatrix.setPosition(
+			markerWidth / 2,
+			markerHeight / 2,
+			0,
+		);
+
+		const root = new Group();
+		root.name = 'MindAR marker pose';
+		root.matrixAutoUpdate = false;
+		root.visible = false;
+
+		const content = new Group();
+		content.name = 'AR Studio marker authored content';
+
+		// Authored coordinates are stored in metres in the editor workspace.
+		// Convert those metres to MindAR's target-width-normalized coordinates
+		// without modifying any placement's own transform.
+		const invWidth = 1 / physicalWidth;
+
+		if (this.sceneType === 'marker-horizontal') {
+			// Editor target:
+			//   X = target horizontal
+			//   Z = target vertical
+			//   Y = height above the print
+			//
+			// MindAR target:
+			//   X/Y = target plane
+			//   Z   = target normal
+			//
+			// Inverting the editor preview's -90° X rotation maps:
+			//   editor X  -> marker X
+			//   editor -Z -> marker Y
+			//   editor Y  -> marker Z
+			content.position.set(
+				0,
+				-SPAWN_DISTANCE_M * invWidth,
+				0,
+			);
+			content.rotation.x = Math.PI / 2;
+			content.scale.setScalar(invWidth);
+		} else {
+			// Vertical target preview is already in the same X/Y orientation as
+			// MindAR. Its editor centre is half the physical target height above the
+			// floor and slightly behind the standard authoring plane.
+			const physicalHeight = Number(this.sceneTarget?.height);
+			const editorZ = -SPAWN_DISTANCE_M - 0.015;
+
+			content.position.set(
+				0,
+				-(physicalHeight / 2) * invWidth,
+				-editorZ * invWidth,
+			);
+			content.scale.setScalar(invWidth);
+		}
+
+		root.add(content);
+
+		this.markerPoseRoot = root;
+		this.markerContentRoot = content;
+		this.scene.add(root);
+
+		// Preserve the editor camera so leaving marker mode is lossless.
+		this._markerCameraRestore = {
+			position: this.camera.position.clone(),
+			yaw: this.cameraYaw,
+			pitch: this.cameraPitch,
+		};
+
+		this.camera.position.set(0, 0, 0);
+		this.camera.rotation.set(0, 0, 0);
+
+		// Parent the real placement groups beneath the runtime conversion layer.
+		// Object3D.add() changes only the parent; every placement's local authored
+		// position/rotation/scale remains exactly as stored and serialized.
+		for (const p of this.placements) {
+			content.add(p.group);
+			p.group.visible = p.visible !== false;
+
+			// Shadows are editor-floor constructs. Until marker-specific contact
+			// shadows exist, hide them rather than pretending the editor floor is the
+			// tracked target plane.
+			if (p.shadow) p.shadow.visible = false;
+		}
+
+		if (this.targetPreview?.mesh) {
+			this.targetPreview.mesh.visible = false;
+		}
+
+		this.selRing.visible = false;
+		this._detachTransformGizmo();
+
+		this._applyMarkerProjection(tracker);
+	}
+
+	_disposeMarkerPoseProof() {
+		const root = this.markerPoseRoot;
+		const content = this.markerContentRoot;
+
+		// Restore the original scene ownership first. Adding an object to `scene`
+		// automatically detaches it from the marker content root, while preserving
+		// the placement's local authored transform values.
+		if (content) {
+			for (const p of this.placements) {
+				if (p.group.parent === content) {
+					this.scene.add(p.group);
+				}
+			}
+		}
+
+		if (root) {
+			this.scene.remove(root);
+		}
+
+		this.markerPoseRoot = null;
+		this.markerContentRoot = null;
+		this.markerPostMatrix = null;
+
+		if (this._markerCameraRestore) {
+			this.camera.position.copy(this._markerCameraRestore.position);
+			this.cameraYaw = this._markerCameraRestore.yaw;
+			this.cameraPitch = this._markerCameraRestore.pitch;
+			this._markerCameraRestore = null;
+		}
+
+		for (const p of this.placements) {
+			p.group.visible = p.visible !== false;
+
+			if (p.shadow) {
+				p.shadow.visible =
+					p.visible !== false &&
+					!this.xrSession;
+			}
+		}
+
+		if (this.targetPreview?.mesh) {
+			this.targetPreview.mesh.visible =
+				this.sceneTarget?.visible !== false;
+		}
+
+		this._syncSelectionState();
+	}
+
+	_applyMarkerProjection(tracker = this.markerTracker) {
+		const proj = tracker?.projectionMatrix;
+
+		if (
+			!tracker?.running ||
+			!Array.isArray(proj) ||
+			proj.length !== 16
+		) {
+			return false;
+		}
+
+		const { width, height } = this._viewportSize();
+
+		const inputWidth = Number(tracker.video?.videoWidth);
+		const inputHeight = Number(tracker.video?.videoHeight);
+
+		if (
+			!(inputWidth > 0) ||
+			!(inputHeight > 0) ||
+			!(width > 0) ||
+			!(height > 0)
+		) {
+			return false;
+		}
+
+		// Same projection adaptation used by MindAR's official Three.js wrapper.
+		// Our video width/height attributes are synchronized to the intrinsic
+		// dimensions, so its inputAdjust term is exactly 1.
+		const inputRatio = inputWidth / inputHeight;
+		const containerRatio = width / height;
+
+		let videoDisplayHeight;
+
+		if (inputRatio > containerRatio) {
+			videoDisplayHeight = height;
+		} else {
+			videoDisplayHeight =
+				width / inputWidth * inputHeight;
+		}
+
+		const fovAdjust = height / videoDisplayHeight;
+		const fov =
+			2 * Math.atan((1 / proj[5]) * fovAdjust) *
+			180 / Math.PI;
+
+		const near = proj[14] / (proj[10] - 1);
+		const far = proj[14] / (proj[10] + 1);
+
+		if (
+			!Number.isFinite(fov) ||
+			!Number.isFinite(near) ||
+			!Number.isFinite(far) ||
+			!(fov > 0) ||
+			!(near > 0) ||
+			!(far > near)
+		) {
+			return false;
+		}
+
+		this.camera.position.set(0, 0, 0);
+		this.camera.rotation.set(0, 0, 0);
+		this.camera.fov = fov;
+		this.camera.near = near;
+		this.camera.far = far;
+		this.camera.aspect = width / height;
+		this.camera.updateProjectionMatrix();
+
+		return true;
+	}
+
+	_applyMarkerPose(matrix) {
+		if (
+			!this.markerPoseRoot ||
+			!this.markerPostMatrix ||
+			!Array.isArray(matrix) ||
+			matrix.length !== 16
+		) return;
+
+		this.markerPoseRoot.matrix
+			.fromArray(matrix)
+			.multiply(this.markerPostMatrix);
+
+		this.markerPoseRoot.visible = true;
+	}
+
+	_hideMarkerPose() {
+		if (this.markerPoseRoot) {
+			this.markerPoseRoot.visible = false;
+		}
+	}
+
+	async _startMarkerTracking() {
+		this._stopMarkerTracking();
+
+		const markerScene =
+			this.sceneType === 'marker-horizontal' ||
+			this.sceneType === 'marker-vertical';
+
+		if (
+			!markerScene ||
+			!this.sceneTarget?.mind ||
+			!this.ui.video
+		) {
+			return false;
+		}
+
+		let tracker = null;
+
+		tracker = new MarkerTracker({
+			video: this.ui.video,
+			mindUrl: this.sceneTarget.mind,
+			onPose: (matrix) => {
+				if (
+					this.markerTracker !== tracker ||
+					!this.arActive
+				) return;
+
+				this._applyMarkerPose(matrix);
+			},
+			onFound: () => {
+				if (
+					this.markerTracker !== tracker ||
+					!this.arActive
+				) return;
+
+				this._setStatus('Marker found.');
+			},
+			onLost: () => {
+				if (
+					this.markerTracker !== tracker ||
+					!this.arActive
+				) return;
+
+				this._hideMarkerPose();
+				this._setStatus('Looking for marker…');
+			},
+			onDiagnostic: (state) => {
+				if (
+					this.markerTracker !== tracker ||
+					!this.arActive ||
+					tracker.visible
+				) return;
+
+				if (state.isTracking) {
+					this._setStatus(
+						`Marker candidate detected — warming up (${state.trackCount}).`,
+					);
+				} else {
+					this._setStatus(
+						`Marker tracker active — scanning (${state.frames} frames).`,
+					);
+				}
+			},
+		});
+
+		this.markerTracker = tracker;
+
+		try {
+			await tracker.start();
+		} catch (err) {
+			if (this.markerTracker === tracker) {
+				this.markerTracker = null;
+			}
+			tracker.dispose();
+			throw err;
+		}
+
+		// Camera shutdown may have happened while the MindAR module, target,
+		// or TensorFlow warmup was still loading.
+		if (
+			this.markerTracker !== tracker ||
+			!this.arActive
+		) {
+			tracker.dispose();
+			return false;
+		}
+
+		try {
+			this._createMarkerPoseProof(tracker);
+		} catch (err) {
+			if (this.markerTracker === tracker) {
+				this.markerTracker = null;
+			}
+			tracker.dispose();
+			this._disposeMarkerPoseProof();
+			throw err;
+		}
+
+		return true;
+	}
+
+	_stopMarkerTracking() {
+		const tracker = this.markerTracker;
+		this.markerTracker = null;
+
+		this._disposeMarkerPoseProof();
+
+		if (!tracker) return;
+
+		try {
+			tracker.dispose();
+		} catch (err) {
+			log.warn('marker tracking teardown failed', err);
+		}
+	}
+
 	async _startCamera() {
 		if (this.arTransitioning || this.arActive || this.xrSession) return;
 		if (!navigator.mediaDevices?.getUserMedia) {
@@ -2840,13 +3233,28 @@ export class ArStudio {
 			this._applyCameraFov();
 			this._startLightMatching();
 			await this._startGyro();
-			// Be honest about what this view is. Passthrough is a phone's gyroscope
-			// over a camera feed: it turns with you, but it has no plane detection
-			// and no positional tracking, so walking around does not hold a model
-			// to a spot on the real floor. Reading that as broken tracking is
-			// exactly the wrong conclusion to leave someone with when the device
-			// has a real AR viewer one tap away.
-			if (this.arMode === 'quicklook' || this.arMode === 'sceneviewer') {
+
+			let markerTracking = false;
+			let markerTrackingError = null;
+
+			try {
+				markerTracking = await this._startMarkerTracking();
+			} catch (err) {
+				markerTrackingError = err;
+				log.warn('marker tracking failed to start', err);
+			}
+
+			if (markerTrackingError) {
+				this._setStatus(
+					`Camera on, but marker tracking could not start (${markerTrackingError?.message ?? markerTrackingError}).`,
+					{ warn: true, sticky: true },
+				);
+			} else if (markerTracking) {
+				this._setStatus('Marker tracking ready. Point the camera at the target.');
+			} else if (this.arMode === 'quicklook' || this.arMode === 'sceneviewer') {
+				// Be honest about what this view is. Passthrough is a phone's
+				// gyroscope over a camera feed: it turns with you, but it has no
+				// plane detection or positional tracking.
 				this._setStatus('Camera on. This preview turns with your phone; to lock a model to your real floor, place it in AR.', {
 					actionLabel: 'Place in AR', onAction: () => this._openArSheet(),
 				});
@@ -2860,6 +3268,8 @@ export class ArStudio {
 	}
 
 	_stopCamera() {
+		this._stopMarkerTracking();
+
 		if (this.mediaStream) {
 			this.mediaStream.getTracks().forEach((t) => { try { t.stop(); } catch { /* already stopped */ } });
 			this.mediaStream = null;
@@ -4879,8 +5289,17 @@ export class ArStudio {
 				p.shadow?.scale.setScalar(Math.max(0.001, target * e));
 			}
 		}
-		if (this.selected) this._positionSelRing();
-		this._applyCameraLook();
+		if (this.selected && !this.markerTracker?.running) {
+			this._positionSelRing();
+		}
+
+		if (this.markerTracker?.running) {
+			this.camera.position.set(0, 0, 0);
+			this.camera.rotation.set(0, 0, 0);
+		} else {
+			this._applyCameraLook();
+		}
+
 		this.renderer.render(this.scene, this.camera);
 	}
 
@@ -4901,6 +5320,12 @@ export class ArStudio {
 	_resize() {
 		const { width, height } = this._viewportSize();
 		this.renderer.setSize(width, height, false);
+
+		if (this.markerTracker?.running) {
+			this._applyMarkerProjection(this.markerTracker);
+			return;
+		}
+
 		this.camera.aspect = width / height;
 		this.camera.updateProjectionMatrix();
 		this._applyCameraFov();
