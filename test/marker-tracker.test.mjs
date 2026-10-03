@@ -12,6 +12,8 @@ import assert from 'node:assert/strict';
 import {
 	MarkerTracker,
 	DEFAULT_RUNTIME_URL,
+	DEFAULT_POSE_SMOOTHING_ALPHA,
+	DEFAULT_LOST_GRACE_MS,
 } from '../src/studio/marker-tracker.js';
 
 const factories = new Map();
@@ -136,6 +138,9 @@ test('default MindAR runtime is the separately-served browser module', () => {
 		DEFAULT_RUNTIME_URL,
 		'/vendor/mindar/mindar-image.prod.js',
 	);
+
+	assert.equal(DEFAULT_POSE_SMOOTHING_ALPHA, 0.40);
+	assert.equal(DEFAULT_LOST_GRACE_MS, 120);
 });
 
 test('start rejects incomplete tracker configuration', async () => {
@@ -304,6 +309,8 @@ test('only target zero drives found, pose, and lost lifecycle callbacks', async 
 		video: video(),
 		mindUrl: '/targets/card.mind',
 		runtimeUrl: runtimeUrl(harness.factory),
+		poseSmoothingAlpha: 1,
+		lostGraceMs: 0,
 		onFound: () => found.push('found'),
 		onPose: (matrix) => poses.push(matrix),
 		onLost: () => lost.push('lost'),
@@ -368,6 +375,141 @@ test('only target zero drives found, pose, and lost lifecycle callbacks', async 
 	});
 
 	assert.equal(lost.length, 1, 'continuous loss must not emit duplicate lost');
+
+	tracker.dispose();
+});
+
+test('default pose smoothing softens translation and rotation after the first pose', async () => {
+	const harness = controllerHarness();
+	const poses = [];
+
+	const tracker = new MarkerTracker({
+		video: video(),
+		mindUrl: '/targets/card.mind',
+		runtimeUrl: runtimeUrl(harness.factory),
+		onPose: (matrix) => poses.push(matrix),
+	});
+
+	await tracker.start();
+
+	const identity = [
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+		0, 0, 1, 0,
+		0, 0, 0, 1,
+	];
+
+	const movedAndTurned = [
+		0, 1, 0, 0,
+		-1, 0, 0, 0,
+		0, 0, 1, 0,
+		1, 0, 0, 1,
+	];
+
+	harness.controller.emit({
+		type: 'updateMatrix',
+		targetIndex: 0,
+		worldMatrix: identity,
+	});
+
+	harness.controller.emit({
+		type: 'updateMatrix',
+		targetIndex: 0,
+		worldMatrix: movedAndTurned,
+	});
+
+	assert.equal(poses.length, 2);
+	assert.deepEqual(poses[0], identity, 'first pose must remain immediate');
+
+	assert.ok(
+		Math.abs(poses[1][12] - 0.4) < 1e-9,
+		'translation should interpolate by the default alpha',
+	);
+
+	assert.notDeepEqual(
+		poses[1],
+		movedAndTurned,
+		'subsequent pose should be smoothed',
+	);
+
+	assert.ok(
+		poses[1].every(Number.isFinite),
+		'smoothed pose must remain a finite 4x4 matrix',
+	);
+
+	tracker.dispose();
+});
+
+test('brief target loss is held through the grace window and reacquisition cancels it', async () => {
+	const harness = controllerHarness();
+
+	let found = 0;
+	let lost = 0;
+
+	const tracker = new MarkerTracker({
+		video: video(),
+		mindUrl: '/targets/card.mind',
+		runtimeUrl: runtimeUrl(harness.factory),
+		poseSmoothingAlpha: 1,
+		lostGraceMs: 25,
+		onFound: () => { found++; },
+		onLost: () => { lost++; },
+	});
+
+	await tracker.start();
+
+	const pose = [
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+		0, 0, 1, 0,
+		0, 0, -1, 1,
+	];
+
+	harness.controller.emit({
+		type: 'updateMatrix',
+		targetIndex: 0,
+		worldMatrix: pose,
+	});
+
+	assert.equal(found, 1);
+	assert.equal(tracker.visible, true);
+
+	// First miss starts the grace window but does not blink the model.
+	harness.controller.emit({
+		type: 'updateMatrix',
+		targetIndex: 0,
+		worldMatrix: null,
+	});
+
+	assert.equal(lost, 0);
+	assert.equal(tracker.visible, true);
+
+	await new Promise((resolve) => setTimeout(resolve, 5));
+
+	// Reacquiring within the window cancels the pending loss.
+	harness.controller.emit({
+		type: 'updateMatrix',
+		targetIndex: 0,
+		worldMatrix: pose,
+	});
+
+	await new Promise((resolve) => setTimeout(resolve, 35));
+
+	assert.equal(lost, 0);
+	assert.equal(found, 1, 'grace-window recovery must not duplicate found');
+	assert.equal(tracker.visible, true);
+
+	// A sustained miss eventually becomes a real loss.
+	harness.controller.emit({
+		type: 'updateMatrix',
+		targetIndex: 0,
+		worldMatrix: null,
+	});
+
+	await new Promise((resolve) => setTimeout(resolve, 40));
+
+	assert.equal(lost, 1);
+	assert.equal(tracker.visible, false);
 
 	tracker.dispose();
 });
