@@ -3096,9 +3096,20 @@ export class ArStudio {
 
 		let tracker = null;
 
+		const horizontalMarker =
+			this.sceneType === 'marker-horizontal';
+
 		tracker = new MarkerTracker({
 			video: this.ui.video,
 			mindUrl: this.sceneTarget.mind,
+
+			// A horizontal print is commonly viewed at a shallower angle than a
+			// vertical marker, which makes its visual pose noisier. Give that mode a
+			// slightly stronger filter and a little more loss tolerance without
+			// changing the already-good vertical marker behaviour.
+			poseSmoothingAlpha: horizontalMarker ? 0.30 : 0.40,
+			lostGraceMs: horizontalMarker ? 160 : 120,
+
 			onPose: (matrix) => {
 				if (
 					this.markerTracker !== tracker ||
