@@ -359,6 +359,29 @@ export class ArStudio {
 			node.addEventListener(type, fn, opts);
 		};
 
+		bind(u.savedSceneNew, 'click', () => this._newSavedSceneFromUi());
+		bind(u.savedSceneOpen, 'click', () => this._openSavedScenesPanel());
+		bind(u.savedSceneSave, 'click', () => this._saveSavedSceneFromUi());
+		bind(u.savedSceneSaveAs, 'click', () => this._saveSavedSceneAsFromUi());
+		bind(u.savedSceneRename, 'click', () => this._renameSavedSceneFromUi());
+		bind(u.savedSceneDuplicate, 'click', () => this._duplicateSavedSceneFromUi());
+		bind(u.savedSceneDelete, 'click', () => this._deleteSavedSceneFromUi());
+		bind(u.savedScenePanelClose, 'click', () => this._closeSavedScenePanel());
+		bind(u.savedScenePanel, 'click', (e) => {
+			if (e.target === u.savedScenePanel) this._closeSavedScenePanel();
+			const button = e.target.closest?.('[data-saved-scene-open]');
+			if (button) this._openSavedSceneFromUi(button.dataset.savedSceneOpen);
+		});
+		bind(u.savedSceneNameCancel, 'click', () => this._resolveSavedSceneDialog(null));
+		bind(u.savedSceneNameSubmit, 'click', () => this._submitSavedSceneNameDialog());
+		bind(u.savedSceneNameInput, 'keydown', (e) => { if (e.key === 'Enter') this._submitSavedSceneNameDialog(); });
+		bind(u.savedSceneDecisionSave, 'click', () => this._resolveSavedSceneDialog('save'));
+		bind(u.savedSceneDecisionDiscard, 'click', () => this._resolveSavedSceneDialog('discard'));
+		bind(u.savedSceneDecisionCancel, 'click', () => this._resolveSavedSceneDialog('cancel'));
+		bind(u.savedSceneConfirmCancel, 'click', () => this._resolveSavedSceneDialog(false));
+		bind(u.savedSceneConfirmSubmit, 'click', () => this._resolveSavedSceneDialog(true));
+		this._syncSavedSceneUi();
+
 		bind(u.cameraBtn, 'click', () => {
 			if (this.arTransitioning || this.xrSession) return;
 			if (this.arActive) {
@@ -573,6 +596,12 @@ export class ArStudio {
 			this.net?.destroy();
 		};
 		window.addEventListener('pagehide', this._onPageHide);
+		this._onBeforeUnload = (e) => {
+			if (this.config.urlExperience || !this.dirty) return;
+			e.preventDefault();
+			e.returnValue = '';
+		};
+		window.addEventListener('beforeunload', this._onBeforeUnload);
 
 		// The host element can resize without the window doing so (a flex layout,
 		// a drawer opening), and a stale drawing buffer looks like a broken canvas.
@@ -1198,6 +1227,7 @@ export class ArStudio {
 		}
 
 		this.recomputeDirtyState();
+		this._syncSavedSceneUi?.();
 	}
 
 	_selectedPlacements() {
@@ -4090,7 +4120,9 @@ export class ArStudio {
 			return;
 		}
 		if (e.key === 'Escape') {
-			if (!this.ui.tray.hidden) this._closeTray();
+			if (this._savedSceneDialog) this._resolveSavedSceneDialog(null);
+			else if (!this.ui.savedScenePanel.hidden) this._closeSavedScenePanel();
+			else if (!this.ui.tray.hidden) this._closeTray();
 			else if (!this.ui.roomModal.hidden) this._closeRoomModal();
 			else if (!this.ui.arModal.hidden) this._closeArSheet();
 			else if (!this.ui.qrModal.hidden) this._closeQr();
@@ -4195,6 +4227,225 @@ export class ArStudio {
 			this._setTrayTab(tabs[next].dataset.tab);
 			tabs[next].focus();
 		});
+	}
+
+
+	_syncSavedSceneUi() {
+		const u = this.ui;
+		if (!u?.savedSceneBar) return;
+		const state = this.getSavedSceneState();
+		const hasIdentity = state.id != null;
+		u.savedSceneName.textContent = state.name || 'Untitled Scene';
+		u.savedSceneState.textContent = state.busy ? 'Working…' : (state.dirty ? 'Unsaved Changes' : (hasIdentity ? 'Saved' : 'Unsaved'));
+		u.savedSceneState.dataset.dirty = String(state.dirty);
+		for (const button of [u.savedSceneNew, u.savedSceneOpen, u.savedSceneSave, u.savedSceneSaveAs, u.savedSceneRename, u.savedSceneDuplicate, u.savedSceneDelete]) {
+			if (button) button.disabled = state.busy || (button === u.savedSceneRename || button === u.savedSceneDuplicate || button === u.savedSceneDelete ? !hasIdentity : false);
+		}
+	}
+
+	_savedSceneUiOperation(operation) {
+		this._syncSavedSceneUi();
+		return Promise.resolve().then(operation).finally(() => this._syncSavedSceneUi());
+	}
+
+	_savedSceneErrorMessage(error) {
+		const messages = {
+			network_error: 'Could not reach the Saved Scenes service.',
+			unavailable: 'Saved Scenes are unavailable.',
+			not_found: 'This Saved Scene no longer exists.',
+			too_large: 'This scene is too large to save.',
+			invalid_scene: 'This scene could not be saved.',
+			invalid_name: 'Enter a name between 1 and 120 characters.',
+			busy: 'A Saved Scene operation is already in progress.',
+			server_error: 'Saved Scenes are temporarily unavailable.',
+			conflict: 'This Saved Scene was changed elsewhere.',
+		};
+		return messages[error?.code] || (error?.code === 'aborted' ? '' : 'Saved Scene operation failed.');
+	}
+
+	_showSavedSceneMessage(message, { warn = true } = {}) {
+		if (!message) return;
+		this._setStatus(message, { warn });
+	}
+
+	_showSavedSceneNameDialog(title, initial = '') {
+		const u = this.ui;
+		u.savedSceneNameModal.querySelector('h2').textContent = title;
+		u.savedSceneNameInput.value = initial;
+		u.savedSceneNameError.hidden = true;
+		u.savedSceneNameModal.hidden = false;
+		this._lastFocus = document.activeElement;
+		u.savedSceneNameInput.focus();
+		return new Promise((resolve) => { this._savedSceneDialog = { resolve, type: 'name' }; });
+	}
+
+	_submitSavedSceneNameDialog() {
+		const value = uTrim(this.ui.savedSceneNameInput.value);
+		if (!value || [...value].length > 120) {
+			this.ui.savedSceneNameError.textContent = 'Enter a name between 1 and 120 characters.';
+			this.ui.savedSceneNameError.hidden = false;
+			return;
+		}
+		this._resolveSavedSceneDialog(value);
+	}
+
+	_showSavedSceneChoice(message, labels = {}) {
+		this.ui.savedSceneDecisionSave.textContent = labels.save || 'Save';
+		this.ui.savedSceneDecisionDiscard.textContent = labels.discard || 'Discard';
+		this.ui.savedSceneDecisionCancel.textContent = labels.cancel || 'Cancel';
+		this.ui.savedSceneDecisionMessage.textContent = message;
+		this.ui.savedSceneDecisionModal.hidden = false;
+		this._lastFocus = document.activeElement;
+		this.ui.savedSceneDecisionSave.focus();
+		return new Promise((resolve) => { this._savedSceneDialog = { resolve, type: 'choice' }; });
+	}
+
+	_showSavedSceneConfirm(message, confirmLabel = 'Confirm') {
+		this.ui.savedSceneConfirmMessage.textContent = message;
+		this.ui.savedSceneConfirmSubmit.textContent = confirmLabel;
+		this.ui.savedSceneConfirmModal.hidden = false;
+		this._lastFocus = document.activeElement;
+		this.ui.savedSceneConfirmSubmit.focus();
+		return new Promise((resolve) => { this._savedSceneDialog = { resolve, type: 'confirm' }; });
+	}
+
+	_resolveSavedSceneDialog(value) {
+		const dialog = this._savedSceneDialog;
+		if (!dialog) return;
+		this.ui.savedSceneNameModal.hidden = true;
+		this.ui.savedSceneDecisionModal.hidden = true;
+		this.ui.savedSceneConfirmModal.hidden = true;
+		this._savedSceneDialog = null;
+		this._restoreFocus(this._lastFocus);
+		dialog.resolve(value);
+	}
+
+	_closeSavedScenePanel() {
+		if (!this.ui.savedScenePanel || this.ui.savedScenePanel.hidden) return;
+		this.ui.savedScenePanel.hidden = true;
+		this._restoreFocus(this._lastFocus);
+	}
+
+	async _confirmSavedSceneNavigation() {
+		if (!this.dirty) return true;
+		const choice = await this._showSavedSceneChoice('You have unsaved changes.');
+		if (choice === 'discard') return true;
+		if (choice !== 'save') return false;
+		try {
+			if (this.currentSavedSceneId) await this.saveSavedScene();
+			else {
+				const name = await this._showSavedSceneNameDialog('Save Scene');
+				if (!name) return false;
+				await this.saveSavedScene({ name });
+			}
+			return true;
+		} catch (error) {
+			this._handleSavedSceneUiError(error);
+			return false;
+		}
+	}
+
+	async _newSavedSceneFromUi() {
+		if (!(await this._confirmSavedSceneNavigation())) return;
+		try {
+			await this.setSceneDocument({ v: 1, items: [] });
+			this.clearSavedSceneIdentity({ dirty: false });
+			this._syncSavedSceneUi();
+		} catch (error) { this._handleSavedSceneUiError(error); }
+	}
+
+	async _saveSavedSceneFromUi() {
+		try {
+			if (this.currentSavedSceneId) await this._savedSceneUiOperation(() => this.saveSavedScene());
+			else {
+				const name = await this._showSavedSceneNameDialog('Save Scene');
+				if (name) await this._savedSceneUiOperation(() => this.saveSavedScene({ name }));
+			}
+		} catch (error) { this._handleSavedSceneUiError(error); }
+	}
+
+	async _saveSavedSceneAsFromUi() {
+		const name = await this._showSavedSceneNameDialog('Save Scene As');
+		if (!name) return;
+		try { await this._savedSceneUiOperation(() => this.saveSavedSceneAs({ name })); }
+		catch (error) { this._handleSavedSceneUiError(error); }
+	}
+
+	async _openSavedScenesPanel() {
+		const canOpen = await this._confirmSavedSceneNavigation();
+		if (!canOpen) return;
+		const u = this.ui;
+		u.savedScenePanel.hidden = false;
+		u.savedScenePanelStatus.textContent = 'Loading saved scenes…';
+		u.savedScenePanelList.textContent = '';
+		this._lastFocus = document.activeElement;
+		try {
+			const scenes = await this._savedSceneUiOperation(() => this.listSavedScenes());
+			u.savedScenePanelStatus.textContent = scenes.length ? '' : 'No saved scenes yet.';
+			for (const scene of scenes) {
+				const row = el('div', { class: 'ars-saved-scene-row', role: 'listitem' }, [
+					el('div', { class: 'ars-saved-scene-row-copy' }, [
+						el('strong', { text: scene.name }),
+						el('small', { text: `${sceneTypeLabel(scene.scene_type)} · ${formatSavedSceneDate(scene.updated_at)}` }),
+					]),
+					el('button', { type: 'button', class: 'ars-btn ars-btn-primary', text: 'Open', 'data-saved-scene-open': scene.id }),
+				]);
+				u.savedScenePanelList.appendChild(row);
+			}
+		} catch (error) {
+			u.savedScenePanelStatus.textContent = this._savedSceneErrorMessage(error) || 'Could not load saved scenes.';
+		}
+	}
+
+	async _openSavedSceneFromUi(id) {
+		this._closeSavedScenePanel();
+		try { await this._savedSceneUiOperation(() => this.openSavedScene(id)); }
+		catch (error) { await this._handleSavedSceneUiError(error); }
+	}
+
+	async _renameSavedSceneFromUi() {
+		if (!this.currentSavedSceneId) return;
+		const name = await this._showSavedSceneNameDialog('Rename Saved Scene', this.currentSavedSceneName);
+		if (!name) return;
+		try { await this._savedSceneUiOperation(() => this.renameSavedScene(name)); }
+		catch (error) { await this._handleSavedSceneUiError(error); }
+	}
+
+	async _duplicateSavedSceneFromUi() {
+		if (!this.currentSavedSceneId) return;
+		const name = await this._showSavedSceneNameDialog('Duplicate Saved Scene');
+		if (!name) return;
+		try {
+			const copy = await this._savedSceneUiOperation(() => this.duplicateSavedScene({ name, adopt: false }));
+			const choice = await this._showSavedSceneChoice('Copy created. Open the copy now?', { save: 'Open Copy', discard: 'Stay Here' });
+			if (choice === 'save') await this._openSavedSceneFromUi(copy.id);
+		} catch (error) { await this._handleSavedSceneUiError(error); }
+	}
+
+	async _deleteSavedSceneFromUi() {
+		if (!this.currentSavedSceneId) return;
+		const name = this.currentSavedSceneName || 'this Saved Scene';
+		const confirmed = await this._showSavedSceneConfirm(`Delete '${name}'? This deletes the editable Saved Scene. Published versions are not affected.`, 'Delete');
+		if (!confirmed) return;
+		try { await this._savedSceneUiOperation(() => this.deleteSavedScene()); }
+		catch (error) { await this._handleSavedSceneUiError(error); }
+	}
+
+	async _handleSavedSceneUiError(error) {
+		if (error?.code === 'conflict') {
+			const choice = await this._showSavedSceneChoice('This Saved Scene was changed elsewhere. Save As or reload it?', { save: 'Save As', discard: 'Reload' });
+			if (choice === 'save') return this._saveSavedSceneAsFromUi();
+			if (choice === 'discard' && this.currentSavedSceneId) {
+				const confirmed = await this._showSavedSceneConfirm('Reloading will discard your local changes. Continue?', 'Reload');
+				if (confirmed) {
+					try { await this._savedSceneUiOperation(() => this.openSavedScene(this.currentSavedSceneId)); }
+					catch (reloadError) { this._showSavedSceneMessage(this._savedSceneErrorMessage(reloadError)); }
+				}
+			}
+			return;
+		}
+		const message = this._savedSceneErrorMessage(error);
+		if (message) this._showSavedSceneMessage(message);
 	}
 
 	_openTray(tab = this._trayTab) {
@@ -6302,6 +6553,7 @@ export class ArStudio {
 		window.removeEventListener('deviceorientation', this._onOrientation, true);
 		window.removeEventListener('resize', this._onResize);
 		window.removeEventListener('pagehide', this._onPageHide);
+		window.removeEventListener('beforeunload', this._onBeforeUnload);
 		if (this._onArReturn) {
 			document.removeEventListener('visibilitychange', this._onArReturn);
 			window.removeEventListener('focus', this._onArReturn);
@@ -6469,3 +6721,7 @@ function publicPlacement(p, studio) {
 		mine: studio._isMine(p),
 	};
 }
+
+function uTrim(value) { return String(value || '').trim(); }
+function sceneTypeLabel(type) { return type === 'marker-horizontal' ? 'Marker Horizontal' : type === 'marker-vertical' ? 'Marker Vertical' : 'Free'; }
+function formatSavedSceneDate(value) { try { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)); } catch { return ''; } }

@@ -924,6 +924,28 @@ export function studioStyles() {
 }
 .ars-forge-go[disabled] { opacity: 0.55; cursor: not-allowed; }
 
+/* ── Saved Scenes ── */
+.ars-saved-scene-bar {
+	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+	padding: 7px 12px; background: rgba(11, 12, 16, 0.78);
+	border-bottom: 1px solid var(--ars-line); color: var(--ars-ink);
+}
+.ars-saved-scene-current { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-right: auto; }
+.ars-saved-scene-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ars-saved-scene-state { color: var(--ars-ink-faint); font-size: 11px; white-space: nowrap; }
+.ars-saved-scene-state[data-dirty="true"] { color: var(--ars-warn); }
+.ars-saved-scene-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ars-saved-scene-btn { padding: 7px 10px; font-size: 12px; }
+.ars-saved-scene-btn.ars-btn-danger { color: #fecaca; }
+.ars-saved-scene-dialog { width: min(560px, 100%); text-align: left; align-items: stretch; }
+.ars-saved-scene-panel-status { min-height: 20px; }
+.ars-saved-scene-list { display: flex; flex-direction: column; gap: 8px; width: 100%; max-height: 52vh; overflow-y: auto; padding: 2px; }
+.ars-saved-scene-row { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--ars-line); border-radius: 12px; background: rgba(255,255,255,.04); }
+.ars-saved-scene-row-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.ars-saved-scene-row-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ars-saved-scene-row-copy small { color: var(--ars-ink-faint); font-size: 11px; }
+.ars-saved-scene-error { color: var(--ars-warn) !important; }
+
 /* ── Tray + modals ── */
 .ars-tray, .ars-modal {
 	position: absolute; inset: 0; z-index: 20; display: flex;
@@ -1160,5 +1182,12 @@ export function studioStyles() {
 	.ars-status { bottom: calc(env(safe-area-inset-bottom, 0px) + 152px); }
 	.ars-selbar { bottom: calc(env(safe-area-inset-bottom, 0px) + 100px); }
 }
+@media (max-width: 560px) {
+  .ars-saved-scene-bar { align-items: stretch; }
+  .ars-saved-scene-current { width: 100%; }
+  .ars-saved-scene-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+  .ars-saved-scene-btn { flex: 0 0 auto; min-height: 38px; }
+}
+
 `;
 }

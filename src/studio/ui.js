@@ -190,6 +190,65 @@ export function buildUI(host, cfg) {
 		roomBtn, qrBtn, xrBtn, cameraBtn,
 	]);
 
+	// ── Saved Scene controls (editor only) ────────────────────────────────────
+	const savedSceneEnabled = !experienceMode;
+	const savedSceneName = el('span', { class: 'ars-saved-scene-name', text: 'Untitled Scene' });
+	const savedSceneState = el('span', { class: 'ars-saved-scene-state', role: 'status', 'aria-live': 'polite', text: 'Unsaved' });
+	const savedSceneNew = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn', text: 'New', disabled: !savedSceneEnabled });
+	const savedSceneOpen = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn', text: 'Open', disabled: !savedSceneEnabled });
+	const savedSceneSave = el('button', { type: 'button', class: 'ars-btn ars-btn-primary ars-saved-scene-btn', text: 'Save', disabled: !savedSceneEnabled });
+	const savedSceneSaveAs = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn', text: 'Save As', disabled: !savedSceneEnabled });
+	const savedSceneRename = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn', text: 'Rename', disabled: !savedSceneEnabled });
+	const savedSceneDuplicate = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn', text: 'Duplicate', disabled: !savedSceneEnabled });
+	const savedSceneDelete = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn ars-btn-danger', text: 'Delete', disabled: !savedSceneEnabled });
+	const savedSceneBar = el('div', { class: 'ars-saved-scene-bar', hidden: !savedSceneEnabled, 'aria-label': 'Saved Scene controls' }, [
+		el('div', { class: 'ars-saved-scene-current' }, [savedSceneName, savedSceneState]),
+		el('div', { class: 'ars-saved-scene-actions', role: 'toolbar', 'aria-label': 'Saved Scene actions' }, [savedSceneNew, savedSceneOpen, savedSceneSave, savedSceneSaveAs, savedSceneRename, savedSceneDuplicate, savedSceneDelete]),
+	]);
+
+	const savedScenePanelClose = el('button', { type: 'button', class: 'ars-btn', text: 'Close' });
+	const savedScenePanelStatus = el('p', { class: 'ars-saved-scene-panel-status', role: 'status', 'aria-live': 'polite' });
+	const savedScenePanelList = el('div', { class: 'ars-saved-scene-list', role: 'list', tabindex: '0' });
+	const savedScenePanel = el('div', { class: 'ars-modal', hidden: true, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'ars-saved-scenes-title' }, [
+		el('div', { class: 'ars-dialog ars-saved-scene-dialog' }, [
+			el('h2', { id: 'ars-saved-scenes-title', text: 'Open Saved Scene' }),
+			savedScenePanelStatus, savedScenePanelList, savedScenePanelClose,
+		]),
+	]);
+
+	const savedSceneNameInput = el('input', { class: 'ars-search', type: 'text', maxlength: '120', autocomplete: 'off', 'aria-label': 'Saved Scene name' });
+	const savedSceneNameError = el('p', { class: 'ars-saved-scene-error', role: 'alert', hidden: true });
+	const savedSceneNameCancel = el('button', { type: 'button', class: 'ars-btn', text: 'Cancel' });
+	const savedSceneNameSubmit = el('button', { type: 'button', class: 'ars-btn ars-btn-primary', text: 'Continue' });
+	const savedSceneNameModal = el('div', { class: 'ars-modal', hidden: true, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'ars-saved-name-title' }, [
+		el('div', { class: 'ars-dialog' }, [
+			el('h2', { id: 'ars-saved-name-title', text: 'Name Saved Scene' }),
+			savedSceneNameInput, savedSceneNameError,
+			el('div', { class: 'ars-dialog-row' }, [savedSceneNameCancel, savedSceneNameSubmit]),
+		]),
+	]);
+
+	const savedSceneDecisionMessage = el('p', {});
+	const savedSceneDecisionSave = el('button', { type: 'button', class: 'ars-btn ars-btn-primary', text: 'Save' });
+	const savedSceneDecisionDiscard = el('button', { type: 'button', class: 'ars-btn', text: 'Discard' });
+	const savedSceneDecisionCancel = el('button', { type: 'button', class: 'ars-btn', text: 'Cancel' });
+	const savedSceneDecisionModal = el('div', { class: 'ars-modal', hidden: true, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'ars-saved-decision-title' }, [
+		el('div', { class: 'ars-dialog' }, [
+			el('h2', { id: 'ars-saved-decision-title', text: 'Unsaved changes' }), savedSceneDecisionMessage,
+			el('div', { class: 'ars-dialog-row' }, [savedSceneDecisionSave, savedSceneDecisionDiscard, savedSceneDecisionCancel]),
+		]),
+	]);
+
+	const savedSceneConfirmMessage = el('p', {});
+	const savedSceneConfirmCancel = el('button', { type: 'button', class: 'ars-btn', text: 'Cancel' });
+	const savedSceneConfirmSubmit = el('button', { type: 'button', class: 'ars-btn ars-btn-primary', text: 'Confirm' });
+	const savedSceneConfirmModal = el('div', { class: 'ars-modal', hidden: true, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'ars-saved-confirm-title' }, [
+		el('div', { class: 'ars-dialog' }, [
+			el('h2', { id: 'ars-saved-confirm-title', text: 'Confirm action' }), savedSceneConfirmMessage,
+			el('div', { class: 'ars-dialog-row' }, [savedSceneConfirmCancel, savedSceneConfirmSubmit]),
+		]),
+	]);
+
 	// ── Progress chip ────────────────────────────────────────────────────────
 	const chip = el('div', { class: 'ars-chip', hidden: true, 'data-state': 'idle', role: 'status', 'aria-live': 'polite' }, [
 		el('span', { class: 'ars-spinner', 'aria-hidden': 'true' }),
@@ -751,8 +810,8 @@ export function buildUI(host, cfg) {
 
 	const hud = el('div', { class: 'ars-hud' }, [
 		runtimeChrome,
-		top, empty, status, chip, selbar, scenePanel, dock, tray,
-		qrModal, exportModal, arModal, roomModal,
+		top, savedSceneBar, empty, status, chip, selbar, scenePanel, dock, tray,
+		qrModal, exportModal, arModal, roomModal, savedScenePanel, savedSceneNameModal, savedSceneDecisionModal, savedSceneConfirmModal,
 	]);
 	const root = el('div', { class: 'ars-root' }, [video, canvas, hud]);
 	if (t.accent) root.style.setProperty('--ars-accent', t.accent);
@@ -768,7 +827,12 @@ export function buildUI(host, cfg) {
 	}
 
 	return {
-		root, video, canvas, hud, top, title, count, status, chip,
+		root, video, canvas, hud, top, title, count, status, chip, savedSceneBar, savedSceneName, savedSceneState,
+		savedSceneNew, savedSceneOpen, savedSceneSave, savedSceneSaveAs, savedSceneRename, savedSceneDuplicate, savedSceneDelete,
+		savedScenePanel, savedScenePanelStatus, savedScenePanelList, savedScenePanelClose,
+		savedSceneNameModal, savedSceneNameInput, savedSceneNameError, savedSceneNameCancel, savedSceneNameSubmit,
+		savedSceneDecisionModal, savedSceneDecisionMessage, savedSceneDecisionSave, savedSceneDecisionDiscard, savedSceneDecisionCancel,
+		savedSceneConfirmModal, savedSceneConfirmMessage, savedSceneConfirmCancel, savedSceneConfirmSubmit,
 		runtimeChrome, runtimeBrand, runtimePrimary, runtimeMobileBtn, runtimePhotoBtn,
 		cameraBtn, xrBtn, qrBtn, roomBtn, sceneBtn, exportBtn, addBtn, photoBtn, clearBtn,
 		forgeForm: canGenerate ? forgeForm : null, forgeInput: canGenerate ? forgeInput : null, forgeGo: canGenerate ? forgeGo : null,
