@@ -42,6 +42,10 @@ import { buildArLaunchUrl } from '../ar-launch.js';
 
 import { applyCinematicDefaults, detectQualityTier, loadEnvironment } from './render.js';
 import { buildUI, el } from './ui.js';
+import {
+	getExperienceJourneyId,
+	trackExperienceEvent,
+} from './analytics.js';
 import { EstimatedLighting } from './estimated-lighting.js';
 import { MultiPlaceSession } from './multi-place.js';
 import { MarkerTracker } from './marker-tracker.js';
@@ -604,6 +608,13 @@ export class ArStudio {
 			}
 
 			await this._activateExperienceMode();
+
+			if (
+				this.config.urlExperience === 'space' ||
+				this.config.urlExperience === 'marker'
+			) {
+				trackExperienceEvent(this.config, 'open');
+			}
 		});
 	}
 
@@ -3390,6 +3401,10 @@ export class ArStudio {
 				);
 			} else if (markerTracking) {
 				this._setStatus('Marker tracking ready. Point the camera at the target.');
+
+				if (this.config.urlExperience === 'marker') {
+					trackExperienceEvent(this.config, 'start');
+				}
 			} else if (this.arMode === 'quicklook' || this.arMode === 'sceneviewer') {
 				// Be honest about what this view is. Passthrough is a phone's
 				// gyroscope over a camera feed: it turns with you, but it has no
@@ -4402,6 +4417,10 @@ export class ArStudio {
 			return;
 		}
 
+		if (this.config.urlExperience === 'space') {
+			trackExperienceEvent(this.config, 'start');
+		}
+
 		this._emit('native-ar-scene', {
 			count: this.placements.length,
 			viewer: handoff.viewer,
@@ -4717,6 +4736,11 @@ export class ArStudio {
 			this._emit('native-ar-error', { error: err, src });
 			return;
 		}
+
+		if (this.config.urlExperience === 'space') {
+			trackExperienceEvent(this.config, 'start');
+		}
+
 		this._emit('native-ar', { src, title, viewer: handoff.viewer });
 		this._closeArSheet();
 		this._setStatus('Point at the floor, then drag to place it.');
@@ -4828,6 +4852,11 @@ export class ArStudio {
 			this._stopLoop();
 			await session.start();
 			this.xrSession = session;
+
+			if (this.config.urlExperience === 'space') {
+				trackExperienceEvent(this.config, 'start');
+			}
+
 			// Real-world lighting and reflections: created after start() so the
 			// addon's sessionstart listener requests the light probe.
 			this.estimatedLight = new EstimatedLighting({
@@ -5015,6 +5044,9 @@ export class ArStudio {
 				filename: 'ar-studio.png',
 				title: this.config.branding?.title || 'AR Studio',
 			});
+
+			trackExperienceEvent(this.config, 'capture');
+
 			this._setStatus(how === 'shared' ? 'Shared.' : 'Saved to your downloads.');
 		} catch (err) {
 			if (err?.name !== 'AbortError') this._setStatus('Could not share that photo.', { warn: true });
@@ -5076,7 +5108,21 @@ export class ArStudio {
 		// experience=space / experience=marker. The editor keeps its existing
 		// portable-scene behavior.
 		const overrideUrl = String(urlOverride || '').trim();
-		const portableUrl = overrideUrl || this.shareUrl();
+		let portableUrl = overrideUrl || this.shareUrl();
+
+		const runtimeJourney = overrideUrl
+			? getExperienceJourneyId(this.config)
+			: '';
+
+		if (runtimeJourney) {
+			try {
+				const journeyUrl = new URL(portableUrl, location.href);
+				journeyUrl.searchParams.set('journey', runtimeJourney);
+				portableUrl = journeyUrl.href;
+			} catch {
+				// Keep the original portable URL if it cannot be parsed.
+			}
+		}
 
 		qrModal.hidden = false;
 
@@ -5107,6 +5153,11 @@ export class ArStudio {
 				if (mode === 'space' || mode === 'marker') {
 					const typedShortUrl = new URL(shortUrl, location.href);
 					typedShortUrl.searchParams.set('experience', mode);
+
+					if (runtimeJourney) {
+						typedShortUrl.searchParams.set('journey', runtimeJourney);
+					}
+
 					shortUrl = typedShortUrl.href;
 				}
 			} catch {
