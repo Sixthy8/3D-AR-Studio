@@ -52,7 +52,8 @@ export {
 
 // Scene math and links: useful for building your own UI on top.
 export {
-	fitTransform, spawnPointInFront, normalizeGlbUrl, serializeScene, deserializeScene,
+	fitTransform, spawnPointInFront, normalizeGlbUrl, normalizeSceneAction,
+	serializeScene, deserializeScene,
 	sceneToHashParam, sceneFromHashParam, studioSceneUrl, studioShareUrl,
 	roomLightFromPixels, twistDelta, touchAngle,
 	MAX_PLACEMENTS, SCALE_MIN, SCALE_MAX, SPAWN_DISTANCE_M,

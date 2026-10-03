@@ -861,6 +861,14 @@ export function studioStyles() {
 	background: rgba(255, 255, 255, 0.11);
 	color: var(--ars-ink);
 }
+.ars-scene-action.is-active {
+	color: var(--ars-accent-ink);
+	background: color-mix(in srgb, var(--ars-accent) 18%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ars-accent) 38%, transparent);
+}
+.ars-scene-action.is-active:hover {
+	background: color-mix(in srgb, var(--ars-accent) 26%, transparent);
+}
 .ars-scene-action[disabled] {
 	opacity: 0.35;
 	cursor: not-allowed;

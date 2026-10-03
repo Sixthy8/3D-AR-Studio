@@ -64,7 +64,7 @@ import {
 } from './pinch.js';
 import {
 	deserializeScene, deserializeSceneDocument, fitTransform, MAX_PLACEMENTS,
-	normalizeGlbUrl, normalizeSceneTarget, normalizeSceneType, roomLightFromPixels,
+	normalizeGlbUrl, normalizeSceneAction, normalizeSceneTarget, normalizeSceneType, roomLightFromPixels,
 	sceneDocumentFromHashParam, sceneFromHashParam, serializeScene,
 	SPAWN_DISTANCE_M, spawnPointInFront,
 	studioSceneUrl, studioShareUrl, touchAngle, twistDelta,
@@ -1162,6 +1162,7 @@ export class ArStudio {
 					scale: this._logicalScale(p),
 					visible: p.visible !== false,
 					group: p.groupId || undefined,
+					action: p.action || undefined,
 				})),
 				this._sceneMetadata(),
 			));
@@ -1390,6 +1391,7 @@ export class ArStudio {
 		rotX = 0, yaw = null, rotZ = 0,
 		scale = null, visible = true, announce = true, persist = true,
 		groupId = null,
+		action = null,
 		remote = false, netId = null, ownerId = null,
 	} = {}) {
 		const url = normalizeGlbUrl(src);
@@ -1474,6 +1476,7 @@ export class ArStudio {
 			groupId: typeof groupId === 'string' && /^g-[A-Za-z0-9_-]{4,64}$/.test(groupId)
 				? groupId
 				: null,
+			action: normalizeSceneAction(action),
 			spawnT: this.reducedMotion ? 1 : 0,
 			netId: netId || null,
 			ownerId: remote ? ownerId : null,
@@ -2424,6 +2427,89 @@ export class ArStudio {
 		this._emit('scene-tree', { open: false });
 	}
 
+	_newSceneActionId() {
+		const uuid = globalThis.crypto?.randomUUID?.();
+
+		if (uuid) return `a-${uuid}`;
+
+		return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+	}
+
+	_duplicateSceneAction(action) {
+		const current = normalizeSceneAction(action);
+		if (!current) return null;
+
+		return {
+			...current,
+			id: this._newSceneActionId(),
+		};
+	}
+
+	_editPlacementLinkAction(p) {
+		if (!this._isMine(p)) {
+			this._setStatus('That model belongs to someone else in the room.', { warn: true });
+			return;
+		}
+
+		const current = normalizeSceneAction(p.action);
+
+		const enteredUrl = window.prompt(
+			'Link URL (HTTPS). Leave blank to remove the link.',
+			current?.url || 'https://',
+		);
+
+		if (enteredUrl === null) return;
+
+		const url = enteredUrl.trim();
+
+		if (!url) {
+			if (!p.action) return;
+
+			p.action = null;
+			this._saveScene();
+			this._renderSceneTree();
+			this._emit('action', {
+				placement: publicPlacement(p, this),
+				action: null,
+			});
+			this._setStatus('Link removed.');
+			return;
+		}
+
+		const enteredLabel = window.prompt(
+			'Link label (optional, up to 80 characters).',
+			current?.label || '',
+		);
+
+		if (enteredLabel === null) return;
+
+		const candidate = {
+			id: current?.id || this._newSceneActionId(),
+			type: 'link',
+			label: enteredLabel.trim(),
+			url,
+		};
+
+		const normalized = normalizeSceneAction(candidate);
+
+		if (!normalized) {
+			this._setStatus(
+				'Link not saved. Use a complete HTTPS URL with no embedded username or password.',
+				{ warn: true },
+			);
+			return;
+		}
+
+		p.action = normalized;
+		this._saveScene();
+		this._renderSceneTree();
+		this._emit('action', {
+			placement: publicPlacement(p, this),
+			action: { ...normalized },
+		});
+		this._setStatus('Link saved.');
+	}
+
 	_renderSceneTree() {
 		const list = this.ui.sceneList;
 		if (!list) return;
@@ -2486,6 +2572,15 @@ export class ArStudio {
 					class: 'ars-scene-action',
 					'data-act': 'duplicate',
 					text: 'Duplicate',
+				}),
+				el('button', {
+					type: 'button',
+					class: `ars-scene-action${p.action ? ' is-active' : ''}`,
+					'data-act': 'link',
+					text: p.action ? 'Link ✓' : 'Link',
+					'aria-pressed': p.action ? 'true' : 'false',
+					title: p.action?.url || 'Add a link action',
+					disabled: !mine,
 				}),
 				el('button', {
 					type: 'button',
@@ -2558,6 +2653,11 @@ export class ArStudio {
 			return;
 		}
 
+		if (act === 'link') {
+			this._editPlacementLinkAction(p);
+			return;
+		}
+
 		if (act === 'duplicate') {
 			this._addModel(
 				{ src: p.src, title: p.title },
@@ -2570,6 +2670,7 @@ export class ArStudio {
 					rotZ: p.rotZ,
 					scale: this._logicalScale(p),
 					visible: p.visible !== false,
+					action: this._duplicateSceneAction(p.action),
 				},
 			);
 			return;
@@ -2617,6 +2718,7 @@ export class ArStudio {
 				rotZ: p.rotZ,
 				scale: this._logicalScale(p),
 				visible: p.visible !== false,
+				action: p.action ? { ...p.action } : null,
 			};
 
 			this._removePlacement(p);
@@ -2719,6 +2821,7 @@ export class ArStudio {
 						rotZ: p.rotZ,
 						scale: this._logicalScale(p),
 						visible: p.visible !== false,
+						action: this._duplicateSceneAction(p.action),
 					},
 				);
 
@@ -2751,6 +2854,7 @@ export class ArStudio {
 				rotZ: p.rotZ,
 				scale: this._logicalScale(p),
 				visible: p.visible !== false,
+				action: p.action ? { ...p.action } : null,
 			}));
 
 			// Clear selection first so per-placement removal doesn't auto-select
@@ -2866,6 +2970,7 @@ export class ArStudio {
 				scale: it.scale,
 				visible: it.visible !== false,
 				groupId: it.group || null,
+				action: it.action || null,
 				announce: false,
 				persist: false,
 			});
@@ -3934,6 +4039,7 @@ export class ArStudio {
 					yaw: p.yaw,
 					rotZ: p.rotZ,
 					scale: this._logicalScale(p),
+					action: this._duplicateSceneAction(p.action),
 				},
 			);
 		} else if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -3950,6 +4056,7 @@ export class ArStudio {
 					yaw: p.yaw,
 					rotZ: p.rotZ,
 					scale: this._logicalScale(p),
+					action: p.action ? { ...p.action } : null,
 				}),
 			});
 		}
@@ -5652,6 +5759,7 @@ export class ArStudio {
 			scale: this._logicalScale(p),
 			visible: p.visible !== false,
 			...(p.groupId ? { group: p.groupId } : {}),
+			...(p.action ? { action: { ...p.action } } : {}),
 		}));
 	}
 
@@ -5667,6 +5775,7 @@ export class ArStudio {
 				scale: it.scale,
 				visible: it.visible !== false,
 				groupId: it.group || null,
+				action: it.action || null,
 				announce: false,
 				persist: false,
 			});

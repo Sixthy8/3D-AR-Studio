@@ -224,6 +224,49 @@ export function normalizeSceneTarget(raw, sceneType = 'free') {
 }
 
 /**
+ * Validate one authored placement action.
+ *
+ * Scene actions are deliberately small and fail closed. Only absolute HTTPS
+ * links are accepted in v1; unsupported or malformed action data disappears
+ * during serialization/deserialization rather than becoming executable state.
+ *
+ * @param {unknown} raw
+ * @returns {{ id:string, type:'link', label?:string, url:string }|null}
+ */
+export function normalizeSceneAction(raw) {
+	if (!raw || typeof raw !== 'object') return null;
+	if (raw.type !== 'link') return null;
+
+	const id = String(raw.id || '').trim();
+	if (!/^a-[A-Za-z0-9_-]{6,64}$/.test(id)) return null;
+
+	const label = String(raw.label || '').trim().slice(0, 80);
+	const urlText = String(raw.url || '').trim();
+
+	if (!urlText || urlText.length > 2048) return null;
+
+	let url;
+
+	try {
+		url = new URL(urlText);
+	} catch {
+		return null;
+	}
+
+	if (url.protocol !== 'https:') return null;
+	if (!url.hostname) return null;
+	if (url.username || url.password) return null;
+
+	return {
+		id,
+		type: 'link',
+		...(label ? { label } : {}),
+		url: url.href,
+	};
+}
+
+
+/**
  * Serialize live placements for localStorage. Only source + transform survive
  * a refresh: meshes are re-loaded from their URLs on restore.
  *
@@ -247,6 +290,9 @@ export function serializeScene(placements, metadata = {}) {
 			...(p.visible === false ? { visible: false } : {}),
 			...(typeof p.group === 'string' && /^g-[A-Za-z0-9_-]{4,64}$/.test(p.group)
 				? { group: p.group }
+				: {}),
+			...(normalizeSceneAction(p.action)
+				? { action: normalizeSceneAction(p.action) }
 				: {}),
 		}))
 		.filter((p) => normalizeGlbUrl(p.src));
@@ -323,6 +369,9 @@ export function deserializeSceneDocument(json) {
 			...(it.visible === false ? { visible: false } : {}),
 			...(typeof it.group === 'string' && /^g-[A-Za-z0-9_-]{4,64}$/.test(it.group)
 				? { group: it.group }
+				: {}),
+			...(normalizeSceneAction(it.action)
+				? { action: normalizeSceneAction(it.action) }
 				: {}),
 		});
 	}
