@@ -224,6 +224,15 @@ export class ArStudio {
 		this.sceneType = 'free';
 		this.sceneTarget = null;
 
+		// Saved Scene identity is editor state only. It is deliberately separate
+		// from the local recovery document and from published experience URLs.
+		this.currentSavedSceneId = null;
+		this.currentSavedSceneName = '';
+		this.currentSavedSceneRevision = null;
+		this.savedSceneBaseline = JSON.stringify({ v: 1, items: [] });
+		this.dirty = false;
+		this.savedSceneBusy = false;
+
 		// Editor-only target preview. This is deliberately not a placement, so it
 		// cannot be selected, grouped, duplicated, deleted, or exported to USDZ.
 		this.targetPreview = {
@@ -624,6 +633,9 @@ export class ArStudio {
 		const mode = this.config.urlExperience;
 
 		if (mode !== 'space' && mode !== 'marker') return;
+
+		// Published experiences are never editable Saved Scene documents.
+		this.clearSavedSceneIdentity({ dirty: false });
 
 		// Published experiences are viewers, not editors. Remove editor-only
 		// selection state and helpers without touching authored scene transforms.
@@ -1149,9 +1161,10 @@ export class ArStudio {
 	}
 
 	_saveScene() {
-		if (this.config.persist === false) return;
+		let localDocumentJson;
+
 		try {
-			localStorage.setItem(this.config.persistKey, serializeScene(
+			localDocumentJson = serializeScene(
 				this.placements.filter((p) => this._isMine(p)).map((p) => ({
 					src: p.src,
 					title: p.title,
@@ -1167,10 +1180,22 @@ export class ArStudio {
 					action: p.action || undefined,
 				})),
 				this._sceneMetadata(),
-			));
+			);
 		} catch {
-			// Storage full or blocked: the live scene is unaffected.
+			// An invalid live placement cannot produce a recovery document. The live
+			// scene remains unaffected, matching the historical persistence behavior.
+			return;
 		}
+
+		if (this.config.persist !== false) {
+			try {
+				localStorage.setItem(this.config.persistKey, localDocumentJson);
+			} catch {
+				// Storage full or blocked: the live scene is unaffected.
+			}
+		}
+
+		this.recomputeDirtyState();
 	}
 
 	_selectedPlacements() {
@@ -3005,6 +3030,9 @@ export class ArStudio {
 
 		this._updateCount();
 		this._saveScene();
+		// Recovery content is an unsaved working draft, never a restored Saved
+		// Scene identity. Its current document is the initial comparison baseline.
+		this.markCurrentDocumentAsBaseline();
 	}
 
 	// ── Camera passthrough ────────────────────────────────────────────────────
@@ -5795,6 +5823,67 @@ export class ArStudio {
 	}
 
 	// ── Public API ────────────────────────────────────────────────────────────
+
+	/** Install the identity returned by a future Saved Scene persistence call. */
+	adoptSavedSceneIdentity({ id = null, name = '', revision = null } = {}) {
+		this.currentSavedSceneId = id == null ? null : String(id);
+		this.currentSavedSceneName = name == null ? '' : String(name);
+		this.currentSavedSceneRevision = revision == null ? null : revision;
+		this.markCurrentDocumentAsBaseline();
+		return this.getSavedSceneState();
+	}
+
+	/** Update identity metadata without changing the document baseline or dirty state. */
+	updateSavedSceneIdentity({ name, revision } = {}) {
+		if (name !== undefined) this.currentSavedSceneName = name == null ? '' : String(name);
+		if (revision !== undefined) this.currentSavedSceneRevision = revision == null ? null : revision;
+		return this.getSavedSceneState();
+	}
+
+	/** Detach the editor from a Saved Scene while retaining the authored document. */
+	clearSavedSceneIdentity({ preserveName = false, dirty = true } = {}) {
+		this.currentSavedSceneId = null;
+		this.currentSavedSceneRevision = null;
+		if (!preserveName) this.currentSavedSceneName = '';
+
+		if (dirty) {
+			// There is no persisted Saved Scene baseline after deletion/detach.
+			this.savedSceneBaseline = '';
+			this.recomputeDirtyState();
+		} else {
+			this.markCurrentDocumentAsBaseline();
+		}
+
+		return this.getSavedSceneState();
+	}
+
+	/** Make the current canonical document the clean comparison baseline. */
+	markCurrentDocumentAsBaseline() {
+		this.savedSceneBaseline = this._currentDocumentJson();
+		this.dirty = false;
+		return this.savedSceneBaseline;
+	}
+
+	/** Recompute dirty state from canonical document JSON, never from UI events. */
+	recomputeDirtyState(documentJson = this._currentDocumentJson()) {
+		this.dirty = documentJson !== this.savedSceneBaseline;
+		return this.dirty;
+	}
+
+	_currentDocumentJson() {
+		return JSON.stringify(this.getSceneDocument());
+	}
+
+	/** Read-only Saved Scene state for future host/UI integration. */
+	getSavedSceneState() {
+		return {
+			id: this.currentSavedSceneId,
+			name: this.currentSavedSceneName,
+			revision: this.currentSavedSceneRevision,
+			dirty: this.dirty,
+			busy: this.savedSceneBusy,
+		};
+	}
 
 	/**
 	 * Add a model to the scene.

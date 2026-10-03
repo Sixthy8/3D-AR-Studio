@@ -67,6 +67,14 @@ export interface SceneDocument {
 	items: SceneItem[];
 }
 
+export interface SavedSceneState {
+	id: string | null;
+	name: string;
+	revision: string | number | null;
+	dirty: boolean;
+	busy: boolean;
+}
+
 export interface AssetItem {
 	src: string;
 	title: string;
@@ -157,6 +165,19 @@ export declare class ArStudio {
 	setScene(items: SceneItem[]): Promise<void>;
 	getSceneDocument(): SceneDocument;
 	setSceneDocument(document: SceneDocument | string): Promise<SceneDocument>;
+	adoptSavedSceneIdentity(identity?: {
+		id?: string | null;
+		name?: string;
+		revision?: string | number | null;
+	}): SavedSceneState;
+	updateSavedSceneIdentity(identity?: {
+		name?: string | null;
+		revision?: string | number | null;
+	}): SavedSceneState;
+	clearSavedSceneIdentity(options?: { preserveName?: boolean; dirty?: boolean }): SavedSceneState;
+	markCurrentDocumentAsBaseline(): string;
+	recomputeDirtyState(): boolean;
+	getSavedSceneState(): SavedSceneState;
 	shareUrl(): string;
 	generate(prompt: string): Promise<GeneratedModel | null>;
 	viewInYourSpace(src: string, title?: string): string;
