@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 
 import {
 	deserializeScene, deserializeSceneDocument, fitTransform, normalizeGlbUrl,
-	normalizeSceneTarget, normalizeSceneType, parseSrcParams, roomLightFromPixels,
+	normalizeSceneAction, normalizeSceneTarget, normalizeSceneType, parseSrcParams, roomLightFromPixels,
 	sceneDocumentFromHashParam, sceneFromHashParam, sceneToHashParam,
 	serializeScene, spawnPointInFront,
 	studioSceneUrl, studioShareUrl, twistDelta, MAX_PLACEMENTS, SCALE_MIN, SCALE_MAX,
@@ -24,6 +24,78 @@ test('normalizeGlbUrl accepts https and site-relative, rejects everything else',
 	]) {
 		assert.equal(normalizeGlbUrl(hostile), null, `${String(hostile)} must be rejected`);
 	}
+});
+
+test('scene link actions normalize only absolute credential-free https URLs', () => {
+	assert.deepEqual(
+		normalizeSceneAction({
+			id: 'a-test123',
+			type: 'link',
+			label: '  Learn more  ',
+			url: 'https://example.com/product',
+		}),
+		{
+			id: 'a-test123',
+			type: 'link',
+			label: 'Learn more',
+			url: 'https://example.com/product',
+		},
+	);
+
+	for (const invalid of [
+		{ id: 'bad', type: 'link', url: 'https://example.com/' },
+		{ id: 'a-test123', type: 'link', url: 'http://example.com/' },
+		{ id: 'a-test123', type: 'link', url: 'javascript:alert(1)' },
+		{ id: 'a-test123', type: 'link', url: 'https://user:pass@example.com/' },
+		{ id: 'a-test123', type: 'unsupported', url: 'https://example.com/' },
+	]) {
+		assert.equal(normalizeSceneAction(invalid), null);
+	}
+});
+
+test('scene link actions preserve their persistent id through serialization', () => {
+	const action = {
+		id: 'a-persist123',
+		type: 'link',
+		label: 'Product',
+		url: 'https://example.com/product',
+	};
+
+	const stored = deserializeScene(
+		serializeScene([{
+			src: 'https://a.com/product.glb',
+			title: 'Product',
+			x: 0,
+			z: -2,
+			yaw: 0,
+			scale: 1,
+			action,
+		}]),
+	);
+
+	assert.deepEqual(stored[0].action, action);
+});
+
+test('invalid persisted scene actions are dropped without dropping the model', () => {
+	const stored = deserializeScene(JSON.stringify({
+		v: 1,
+		items: [{
+			src: 'https://a.com/product.glb',
+			title: 'Product',
+			x: 0,
+			z: -2,
+			yaw: 0,
+			scale: 1,
+			action: {
+				id: 'a-bad123',
+				type: 'link',
+				url: 'http://evil.example/',
+			},
+		}],
+	}));
+
+	assert.equal(stored.length, 1);
+	assert.equal('action' in stored[0], false);
 });
 
 test('free scenes keep the historical v1 document shape', () => {

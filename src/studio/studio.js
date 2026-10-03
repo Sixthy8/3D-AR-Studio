@@ -45,6 +45,7 @@ import { buildUI, el } from './ui.js';
 import {
 	getExperienceJourneyId,
 	getExperienceSceneKey,
+	getExperienceSessionId,
 	trackExperienceEvent,
 } from './analytics.js';
 import { EstimatedLighting } from './estimated-lighting.js';
@@ -3826,6 +3827,15 @@ export class ArStudio {
 	_placementAt(clientX, clientY) {
 		if (!this.placements.length) return null;
 		this._setNdc(clientX, clientY);
+
+		// Marker tracking drives markerPoseRoot.matrix manually with
+		// matrixAutoUpdate disabled. Rendering normally propagates that matrix to
+		// its descendants, but a pointer event may land between a tracker pose
+		// update and the next render frame. Synchronize world matrices here so the
+		// raycaster always sees exactly the transform currently being displayed.
+		this.camera.updateMatrixWorld(true);
+		this.scene.updateMatrixWorld(true);
+
 		this._raycaster.setFromCamera(this._ndc, this.camera);
 		const hits = this._raycaster.intersectObjects(
 			this.placements.filter((p) => p.visible !== false).map((p) => p.group),
@@ -3929,6 +3939,12 @@ export class ArStudio {
 			`/r/${encodeURIComponent(sceneKey)}/${encodeURIComponent(action.id)}`,
 			location.origin,
 		);
+
+		// Ensure the server-side redirect can correlate this action with the
+		// browser session without exposing the session identifier in the URL.
+		getExperienceSessionId();
+
+		redirectUrl.searchParams.set('experience', mode);
 
 		const journey = getExperienceJourneyId(this.config);
 

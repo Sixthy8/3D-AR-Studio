@@ -3,6 +3,22 @@ const SESSION_KEY = 'sixty8-ar-studio:analytics-session';
 
 let generatedJourneyId = '';
 
+const SESSION_COOKIE = 's68_ar_session';
+
+function mirrorSessionCookie(value) {
+	if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(value || ''))) return;
+
+	try {
+		const secure = location.protocol === 'https:' ? '; Secure' : '';
+
+		document.cookie =
+			`${SESSION_COOKIE}=${value}; Path=/; SameSite=Lax${secure}`;
+	} catch {
+		// Session storage remains the primary client-side identity.
+	}
+}
+
+
 function runtimeMode(config) {
 	const mode = String(config?.urlExperience || '').trim().toLowerCase();
 	return mode === 'space' || mode === 'marker'
@@ -43,6 +59,7 @@ function sessionId() {
 		const existing = sessionStorage.getItem(SESSION_KEY);
 
 		if (existing && /^[A-Za-z0-9_-]{1,64}$/.test(existing)) {
+			mirrorSessionCookie(existing);
 			return existing;
 		}
 
@@ -51,6 +68,7 @@ function sessionId() {
 		if (!next) return '';
 
 		sessionStorage.setItem(SESSION_KEY, next);
+		mirrorSessionCookie(next);
 		return next;
 	} catch {
 		return randomId().replace(/-/g, '');
@@ -96,6 +114,10 @@ function journeyId(config) {
 
 export function getExperienceJourneyId(config) {
 	return journeyId(config);
+}
+
+export function getExperienceSessionId() {
+	return sessionId();
 }
 
 export function getExperienceSceneKey() {
