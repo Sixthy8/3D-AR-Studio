@@ -44,6 +44,7 @@ import { applyCinematicDefaults, detectQualityTier, loadEnvironment } from './re
 import { buildUI, el } from './ui.js';
 import {
 	getExperienceJourneyId,
+	getExperienceSceneKey,
 	trackExperienceEvent,
 } from './analytics.js';
 import { EstimatedLighting } from './estimated-lighting.js';
@@ -3903,6 +3904,42 @@ export class ArStudio {
 		}
 	}
 
+	_openPublishedPlacementAction(placement) {
+		const mode = this.config.urlExperience;
+
+		if (mode !== 'space' && mode !== 'marker') {
+			return false;
+		}
+
+		const action = normalizeSceneAction(placement?.action);
+
+		if (!action) return false;
+
+		const sceneKey = getExperienceSceneKey();
+
+		if (!sceneKey) {
+			this._setStatus(
+				'This link is unavailable from a portable preview. Open the published scene URL and try again.',
+				{ warn: true },
+			);
+			return true;
+		}
+
+		const redirectUrl = new URL(
+			`/r/${encodeURIComponent(sceneKey)}/${encodeURIComponent(action.id)}`,
+			location.origin,
+		);
+
+		const journey = getExperienceJourneyId(this.config);
+
+		if (journey) {
+			redirectUrl.searchParams.set('journey', journey);
+		}
+
+		location.assign(redirectUrl.href);
+		return true;
+	}
+
 	_onPointerUp(e) {
 		const down = this._pointer;
 		if (!down || this.xrSession || this._gizmoDragging) return;
@@ -3911,6 +3948,21 @@ export class ArStudio {
 			&& !this._pinch.active
 			&& performance.now() - this._pinchEndedAt >= 350;
 		if (wasTap) {
+			const published =
+				this.config.urlExperience === 'space' ||
+				this.config.urlExperience === 'marker';
+
+			if (published) {
+				if (down.placement) {
+					this._openPublishedPlacementAction(down.placement);
+				}
+
+				// Published experiences are viewers, not editors. A tap either
+				// executes an authored action or does nothing; it never selects.
+				this._pointer = null;
+				return;
+			}
+
 			if (down.placement && down.multiSelect) {
 				this._toggleSelection(down.placement);
 			} else {

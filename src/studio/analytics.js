@@ -98,6 +98,10 @@ export function getExperienceJourneyId(config) {
 	return journeyId(config);
 }
 
+export function getExperienceSceneKey() {
+	return sceneKey();
+}
+
 function deviceClass() {
 	const ua = String(navigator.userAgent || '');
 
