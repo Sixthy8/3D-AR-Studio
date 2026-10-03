@@ -124,6 +124,8 @@ export interface StudioOptions {
 	branding?: { title?: string; accent?: string; backHref?: string | null; backLabel?: string };
 	/** Where share links and QR codes point. Defaults to the hosting page. */
 	shareBaseUrl?: string;
+	/** Optional Saved Scene API collection endpoint. Blank disables transport. */
+	savedScenesEndpoint?: string;
 	/** Origin used for the hosted "View in your space" launcher and viewer links. */
 	origin?: string;
 	arLaunchUrl?: string;

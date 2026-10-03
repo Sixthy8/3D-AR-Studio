@@ -75,6 +75,7 @@ import {
 	generateRoomCode, localToShared, normalizeRoomCode, roomKeyForCode, roomShareUrl, sharedToLocal,
 } from './coords.js';
 import { StudioNet } from './net.js';
+import { createSavedSceneClient } from './saved-scenes.js';
 
 const log = createLogger('ar-studio');
 
@@ -95,6 +96,7 @@ export class ArStudio {
 		if (!host) throw new Error('ar-studio: a host element is required');
 		this.host = host;
 		this.config = resolveConfig(options);
+		this._savedScenes = createSavedSceneClient({ endpoint: this.config.savedScenesEndpoint });
 		this.clientId = readClientId(this.config.persistKey);
 		this.sources = resolveSources(this.config.assets, this.config);
 		this._listeners = new Map();

@@ -89,6 +89,8 @@ export const DEFAULTS = {
 	 * Leave blank to use the portable #s= scene URL only.
 	 */
 	sceneShareEndpoint: '',
+	/** Optional Saved Scene API collection endpoint. Blank disables transport. */
+	savedScenesEndpoint: '',
 	/** localStorage key for the persisted scene. Change it to run two studios on one origin. */
 	persistKey: 'ar-studio:scene:v1',
 	/** Cap on simultaneous placements. Keeps low-end phones interactive. */
