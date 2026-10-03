@@ -75,7 +75,7 @@ import {
 	generateRoomCode, localToShared, normalizeRoomCode, roomKeyForCode, roomShareUrl, sharedToLocal,
 } from './coords.js';
 import { StudioNet } from './net.js';
-import { createSavedSceneClient } from './saved-scenes.js';
+import { SavedSceneError, createSavedSceneClient } from './saved-scenes.js';
 
 const log = createLogger('ar-studio');
 
@@ -5885,6 +5885,180 @@ export class ArStudio {
 			dirty: this.dirty,
 			busy: this.savedSceneBusy,
 		};
+	}
+
+	/** Run one serialized Saved Scene operation against the optional transport. */
+	async _runSavedSceneOperation(operation, { signal } = {}) {
+		this._ensureSavedScenesAvailable();
+		if (this.savedSceneBusy) {
+			throw new SavedSceneError('Another Saved Scene operation is already in progress.', {
+				code: 'busy',
+			});
+		}
+		this.savedSceneBusy = true;
+		try {
+			return await operation(signal);
+		} finally {
+			this.savedSceneBusy = false;
+		}
+	}
+
+	_ensureSavedScenesAvailable() {
+		if (this.config?.urlExperience === 'space' || this.config?.urlExperience === 'marker') {
+			throw new SavedSceneError('Saved Scenes are unavailable in published experiences.', {
+				code: 'unavailable',
+			});
+		}
+		if (!this._savedScenes) {
+			throw new SavedSceneError('Saved Scene transport is unavailable.', {
+				code: 'unavailable',
+			});
+		}
+	}
+
+	_assertSavedSceneIdentity() {
+		if (this.currentSavedSceneId == null || !Number.isSafeInteger(this.currentSavedSceneRevision)
+			|| this.currentSavedSceneRevision < 1) {
+			throw new SavedSceneError('A Saved Scene identity and revision are required.', {
+				code: 'unavailable',
+			});
+		}
+	}
+
+	_assertServerDocumentMatchesCurrent(resource, currentDocument = this.getSceneDocument()) {
+		if (JSON.stringify(resource.scene) !== JSON.stringify(currentDocument)) {
+			throw new SavedSceneError('Saved Scene server document differs from the editor document.', {
+				code: 'protocol_error',
+			});
+		}
+	}
+
+	/** List Saved Scene metadata without changing the current editor state. */
+	listSavedScenes(options = {}) {
+		return this._runSavedSceneOperation(
+			(signal) => this._savedScenes.list({ ...options, signal }),
+			options,
+		);
+	}
+
+	/** Save the current document, creating it when no Saved Scene is open. */
+	saveSavedScene({ name, signal } = {}) {
+		return this._runSavedSceneOperation(async () => {
+			const document = this.getSceneDocument();
+			let resource;
+			if (this.currentSavedSceneId == null) {
+				if (name === undefined) {
+					throw new SavedSceneError('A Saved Scene name is required for first Save.', {
+						code: 'invalid_name',
+					});
+				}
+				resource = await this._savedScenes.create({ name, scene: document }, { signal });
+			} else {
+				this._assertSavedSceneIdentity();
+				resource = await this._savedScenes.update(this.currentSavedSceneId, {
+					scene: document,
+					revision: this.currentSavedSceneRevision,
+				}, { signal });
+			}
+			this._assertServerDocumentMatchesCurrent(resource, document);
+			this.adoptSavedSceneIdentity({
+				id: resource.id,
+				name: resource.name,
+				revision: resource.revision,
+			});
+			return resource;
+		}, { signal });
+	}
+
+	/** Always create and adopt a new Saved Scene identity. */
+	saveSavedSceneAs({ name, signal } = {}) {
+		return this._runSavedSceneOperation(async () => {
+			const document = this.getSceneDocument();
+			if (name === undefined) {
+				throw new SavedSceneError('A Saved Scene name is required for Save As.', {
+					code: 'invalid_name',
+				});
+			}
+			const resource = await this._savedScenes.create({ name, scene: document }, { signal });
+			this._assertServerDocumentMatchesCurrent(resource, document);
+			this.adoptSavedSceneIdentity({ id: resource.id, name: resource.name, revision: resource.revision });
+			return resource;
+		}, { signal });
+	}
+
+	/** Open a Saved Scene atomically, adopting identity only after restoration succeeds. */
+	openSavedScene(id, { signal } = {}) {
+		return this._runSavedSceneOperation(async () => {
+			const previousDocument = this.getSceneDocument();
+			const previousState = {
+				id: this.currentSavedSceneId,
+				name: this.currentSavedSceneName,
+				revision: this.currentSavedSceneRevision,
+				baseline: this.savedSceneBaseline,
+				dirty: this.dirty,
+			};
+			const resource = await this._savedScenes.get(id, { signal });
+			try {
+				const restored = await this.setSceneDocument(resource.scene);
+				if (JSON.stringify(restored) !== JSON.stringify(resource.scene)) {
+					throw new SavedSceneError('Saved Scene restore was not canonical.', { code: 'protocol_error' });
+				}
+				this.adoptSavedSceneIdentity({ id: resource.id, name: resource.name, revision: resource.revision });
+				return resource;
+			} catch (error) {
+				try { await this.setSceneDocument(previousDocument); } catch { /* preserve original failure */ }
+				this.currentSavedSceneId = previousState.id;
+				this.currentSavedSceneName = previousState.name;
+				this.currentSavedSceneRevision = previousState.revision;
+				this.savedSceneBaseline = previousState.baseline;
+				this.dirty = previousState.dirty;
+				throw error;
+			}
+		}, { signal });
+	}
+
+	/** Rename the current Saved Scene without changing its document baseline. */
+	renameSavedScene(name, { signal } = {}) {
+		return this._runSavedSceneOperation(async () => {
+			this._assertSavedSceneIdentity();
+			const dirty = this.dirty;
+			const baseline = this.savedSceneBaseline;
+			const resource = await this._savedScenes.rename(this.currentSavedSceneId, {
+				name,
+				revision: this.currentSavedSceneRevision,
+			}, { signal });
+			this.updateSavedSceneIdentity({ name: resource.name, revision: resource.revision });
+			this.savedSceneBaseline = baseline;
+			this.dirty = dirty;
+			return resource;
+		}, { signal });
+	}
+
+	/** Duplicate the current Saved Scene without changing editor identity. */
+	duplicateSavedScene({ name, adopt = false, signal } = {}) {
+		return this._runSavedSceneOperation(async () => {
+			this._assertSavedSceneIdentity();
+			const resource = await this._savedScenes.duplicate(this.currentSavedSceneId, { name }, { signal });
+			if (adopt) {
+				this._assertServerDocumentMatchesCurrent(resource);
+				this.adoptSavedSceneIdentity({ id: resource.id, name: resource.name, revision: resource.revision });
+			}
+			return resource;
+		}, { signal });
+	}
+
+	/** Delete a current or explicitly identified Saved Scene. */
+	deleteSavedScene(id = this.currentSavedSceneId, { revision, signal } = {}) {
+		return this._runSavedSceneOperation(async () => {
+			const isCurrent = id != null && id === this.currentSavedSceneId;
+			const targetRevision = revision ?? (isCurrent ? this.currentSavedSceneRevision : null);
+			if (id == null || !Number.isSafeInteger(targetRevision) || targetRevision < 1) {
+				throw new SavedSceneError('A Saved Scene ID and revision are required.', { code: 'invalid_revision' });
+			}
+			await this._savedScenes.delete(id, { revision: targetRevision }, { signal });
+			if (isCurrent) this.clearSavedSceneIdentity({ preserveName: true, dirty: true });
+			return true;
+		}, { signal });
 	}
 
 	/**

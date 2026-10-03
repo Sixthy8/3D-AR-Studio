@@ -67,6 +67,19 @@ export interface SceneDocument {
 	items: SceneItem[];
 }
 
+export interface SavedSceneMetadata {
+	id: string;
+	name: string;
+	scene_type: SceneType;
+	revision: number;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface SavedScene extends SavedSceneMetadata {
+	scene: SceneDocument;
+}
+
 export interface SavedSceneState {
 	id: string | null;
 	name: string;
@@ -180,6 +193,13 @@ export declare class ArStudio {
 	markCurrentDocumentAsBaseline(): string;
 	recomputeDirtyState(): boolean;
 	getSavedSceneState(): SavedSceneState;
+	listSavedScenes(options?: { limit?: number; offset?: number; signal?: AbortSignal }): Promise<SavedSceneMetadata[]>;
+	saveSavedScene(options?: { name?: string; signal?: AbortSignal }): Promise<SavedScene>;
+	saveSavedSceneAs(options: { name: string; signal?: AbortSignal }): Promise<SavedScene>;
+	openSavedScene(id: string, options?: { signal?: AbortSignal }): Promise<SavedScene>;
+	renameSavedScene(name: string, options?: { signal?: AbortSignal }): Promise<SavedScene>;
+	duplicateSavedScene(options: { name: string; adopt?: boolean; signal?: AbortSignal }): Promise<SavedScene>;
+	deleteSavedScene(id?: string, options?: { revision?: number; signal?: AbortSignal }): Promise<boolean>;
 	shareUrl(): string;
 	generate(prompt: string): Promise<GeneratedModel | null>;
 	viewInYourSpace(src: string, title?: string): string;
