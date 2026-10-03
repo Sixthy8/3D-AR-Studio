@@ -99,6 +99,7 @@ export function studioStyles() {
 }
 
 .ars-runtime-primary,
+.ars-runtime-mobile,
 .ars-runtime-photo {
 	appearance: none;
 	cursor: pointer;
@@ -123,6 +124,17 @@ export function studioStyles() {
 	font-size: 14px;
 }
 
+.ars-runtime-mobile {
+	min-height: 48px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	border-radius: 999px;
+	padding: 12px 17px;
+	font-size: 13px;
+}
+
 .ars-runtime-photo {
 	width: 48px;
 	height: 48px;
@@ -133,17 +145,20 @@ export function studioStyles() {
 }
 
 .ars-runtime-primary:hover,
+.ars-runtime-mobile:hover,
 .ars-runtime-photo:hover {
 	background: rgba(22, 25, 34, 0.88);
 	border-color: rgba(255, 255, 255, 0.36);
 }
 
 .ars-runtime-primary:active,
+.ars-runtime-mobile:active,
 .ars-runtime-photo:active {
 	transform: translateY(1px);
 }
 
 .ars-runtime-primary[disabled],
+.ars-runtime-mobile[disabled],
 .ars-runtime-photo[disabled] {
 	opacity: 0.42;
 	cursor: not-allowed;
@@ -188,6 +203,12 @@ export function studioStyles() {
 		min-height: 46px;
 		padding: 11px 17px;
 		font-size: 13.5px;
+	}
+
+	.ars-runtime-mobile {
+		min-height: 46px;
+		padding: 11px 15px;
+		font-size: 13px;
 	}
 
 	.ars-runtime-photo {

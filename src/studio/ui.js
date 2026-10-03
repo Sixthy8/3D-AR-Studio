@@ -100,6 +100,16 @@ export function buildUI(host, cfg) {
 		}),
 	]);
 
+	const runtimeMobileBtn = el('button', {
+		type: 'button',
+		class: 'ars-runtime-mobile',
+		hidden: !experienceMode,
+		'aria-label': 'Open this AR experience on your phone',
+	}, [
+		el('span', { 'aria-hidden': 'true', text: '📱' }),
+		el('span', { text: 'Open on mobile' }),
+	]);
+
 	const runtimePhotoBtn = el('button', {
 		type: 'button',
 		class: 'ars-runtime-photo',
@@ -115,6 +125,7 @@ export function buildUI(host, cfg) {
 		hidden: !experienceMode,
 	}, [
 		runtimePrimary,
+		runtimeMobileBtn,
 		runtimePhotoBtn,
 	]);
 
@@ -758,7 +769,7 @@ export function buildUI(host, cfg) {
 
 	return {
 		root, video, canvas, hud, top, title, count, status, chip,
-		runtimeChrome, runtimeBrand, runtimePrimary, runtimePhotoBtn,
+		runtimeChrome, runtimeBrand, runtimePrimary, runtimeMobileBtn, runtimePhotoBtn,
 		cameraBtn, xrBtn, qrBtn, roomBtn, sceneBtn, exportBtn, addBtn, photoBtn, clearBtn,
 		forgeForm: canGenerate ? forgeForm : null, forgeInput: canGenerate ? forgeInput : null, forgeGo: canGenerate ? forgeGo : null,
 		empty, emptyCamera, emptyAdd, emptyForge,

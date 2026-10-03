@@ -374,6 +374,12 @@ export class ArStudio {
 		bind(u.photoBtn, 'click', () => this._capturePhoto());
 		bind(u.runtimePhotoBtn, 'click', () => this._capturePhoto());
 		bind(u.runtimePrimary, 'click', () => this._onRuntimePrimary());
+		bind(u.runtimeMobileBtn, 'click', () => {
+			const mode = this.config.urlExperience;
+			if (mode === 'space' || mode === 'marker') {
+				this._openQr(this._experienceUrl(mode));
+			}
+		});
 		bind(u.qrBtn, 'click', () => this._openQr());
 		bind(u.qrClose, 'click', () => this._closeQr());
 		bind(u.qrModal, 'click', (e) => { if (e.target === u.qrModal) this._closeQr(); });
@@ -654,6 +660,13 @@ export class ArStudio {
 		const mode = this.config.urlExperience;
 		const btn = this.ui.runtimePrimary;
 		const label = btn?.querySelector('.ars-runtime-primary-label');
+
+		if (this.ui.runtimeMobileBtn) {
+			const coarse = window.matchMedia?.('(pointer: coarse)').matches;
+			this.ui.runtimeMobileBtn.hidden =
+				(mode !== 'space' && mode !== 'marker') ||
+				Boolean(coarse);
+		}
 
 		if (!btn || !label) return;
 
@@ -5053,15 +5066,17 @@ export class ArStudio {
 		}
 	}
 
-	async _openQr() {
+	async _openQr(urlOverride = '') {
 		const { qrModal, qrBox, qrLink } = this.ui;
 		if (!qrModal) return;
 
 		this._lastFocus = document.activeElement;
 
-		// The portable URL is always available and contains the exact current
-		// arrangement. It remains the fallback if the optional scene store is down.
-		const portableUrl = this.shareUrl();
+		// Runtime experiences pass their exact typed launch URL so the QR preserves
+		// experience=space / experience=marker. The editor keeps its existing
+		// portable-scene behavior.
+		const overrideUrl = String(urlOverride || '').trim();
+		const portableUrl = overrideUrl || this.shareUrl();
 
 		qrModal.hidden = false;
 
@@ -5081,7 +5096,24 @@ export class ArStudio {
 		// aria-modal is a promise that focus is inside the dialog.
 		this.ui.qrClose?.focus?.();
 
-		const shortUrl = await this._shortSceneUrl();
+		// Use the existing scene shortener for published experiences too. A typed
+		// runtime only needs its experience mode added back onto the compact scene
+		// URL; the stored scene itself remains the same.
+		let shortUrl = await this._shortSceneUrl();
+
+		if (shortUrl && overrideUrl) {
+			try {
+				const mode = this.config.urlExperience;
+				if (mode === 'space' || mode === 'marker') {
+					const typedShortUrl = new URL(shortUrl, location.href);
+					typedShortUrl.searchParams.set('experience', mode);
+					shortUrl = typedShortUrl.href;
+				}
+			} catch {
+				shortUrl = '';
+			}
+		}
+
 		const url = shortUrl || portableUrl;
 
 		// The person may have closed the sheet while the API request was running.
@@ -5096,15 +5128,19 @@ export class ArStudio {
 					light: '#ffffff',
 				});
 			} catch {
-				// This should normally only be reachable when no short-link endpoint is
-				// configured or available. Preserve the original models-only QR fallback.
-				try {
-					qrBox.innerHTML = renderQRToSVG(
-						studioShareUrl(this.config.shareBaseUrl, this.getScene()),
-						{ scale: 6, margin: 2, dark: '#0b0b0b', light: '#ffffff' },
-					);
-				} catch {
+				if (overrideUrl) {
+					// A published runtime must never silently fall back to an editor URL.
 					qrBox.textContent = url;
+				} else {
+					// Preserve the editor's historical models-only QR fallback.
+					try {
+						qrBox.innerHTML = renderQRToSVG(
+							studioShareUrl(this.config.shareBaseUrl, this.getScene()),
+							{ scale: 6, margin: 2, dark: '#0b0b0b', light: '#ffffff' },
+						);
+					} catch {
+						qrBox.textContent = url;
+					}
 				}
 			}
 		}
