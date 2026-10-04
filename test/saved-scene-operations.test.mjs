@@ -38,6 +38,18 @@ function adopt(studio, id = metadata.id, revision = metadata.revision) {
   studio.adoptSavedSceneIdentity({ id, name: metadata.name, revision });
 }
 
+function attachSavedSceneUi(studio) {
+  const button = () => ({ disabled: false });
+  studio.ui = {
+    savedSceneTrigger: { hidden: false },
+    savedSceneName: { textContent: '' },
+    savedSceneState: { textContent: '', dataset: {} },
+    savedSceneNew: button(), savedSceneOpen: button(), savedSceneSave: button(), savedSceneSaveAs: button(),
+    savedSceneRename: button(), savedSceneDuplicate: button(), savedSceneDelete: button(),
+  };
+  return studio.ui;
+}
+
 for (const experience of ['space', 'marker']) {
   test(`Saved Scene operations are unavailable in ${experience} experience`, async () => {
     const studio = harness({ client: client(), experience });
@@ -131,4 +143,123 @@ test('overlapping mutations are rejected and busy resets after abort/failure', a
   const studio = harness({ client: client({ list: async () => pending }) });
   const first = studio.listSavedScenes(); await new Promise((resolve) => setTimeout(resolve, 0));
   await assert.rejects(() => studio.listSavedScenes(), (error) => error.code === 'busy'); release([]); await first; assert.equal(studio.savedSceneBusy, false);
+});
+
+test('direct programmatic Open synchronizes busy lifecycle and final fetched identity to the header', async () => {
+  const sceneKey = 'B'.repeat(22);
+  const fetched = { ...resource, id: sceneKey, name: 'Paint-2', revision: 12 };
+  const studio = harness({ client: client({ get: async () => structuredClone(fetched) }) });
+  const ui = attachSavedSceneUi(studio);
+  const syncBusyStates = [];
+  studio._syncSavedSceneUi = function syncSavedSceneUi() {
+    syncBusyStates.push(this.savedSceneBusy);
+    return ArStudio.prototype._syncSavedSceneUi.call(this);
+  };
+
+  await studio.openSavedScene(sceneKey, { preserveLocalRecovery: true });
+
+  assert.deepEqual(studio.getSavedSceneState(), {
+    id: sceneKey,
+    name: fetched.name,
+    revision: fetched.revision,
+    dirty: false,
+    busy: false,
+  });
+  assert.deepEqual(syncBusyStates, [true, false]);
+  assert.equal(ui.savedSceneName.textContent, 'Paint-2');
+  assert.equal(ui.savedSceneState.textContent, '');
+  assert.equal(ui.savedSceneSave.disabled, false);
+  assert.equal(ui.savedSceneRename.disabled, false);
+});
+
+test('operation failure and abort both clear busy and perform the final UI synchronization', async () => {
+  for (const error of [
+    new SavedSceneError('failed', { code: 'network_error' }),
+    new SavedSceneError('aborted', { code: 'aborted' }),
+  ]) {
+    const studio = harness({ client: client({ get: async () => { throw error; } }) });
+    const ui = attachSavedSceneUi(studio);
+    const syncBusyStates = [];
+    studio._syncSavedSceneUi = function syncSavedSceneUi() {
+      syncBusyStates.push(this.savedSceneBusy);
+      return ArStudio.prototype._syncSavedSceneUi.call(this);
+    };
+
+    await assert.rejects(() => studio.openSavedScene('B'.repeat(22), {
+      preserveLocalRecovery: true,
+    }), (caught) => caught === error);
+
+    assert.equal(studio.getSavedSceneState().busy, false);
+    assert.deepEqual(syncBusyStates, [true, false]);
+    assert.equal(ui.savedSceneState.textContent, '');
+    assert.equal(ui.savedSceneSave.disabled, false);
+  }
+});
+
+test('programmatic Open followed by the built-in Save path updates the same scene and never creates', async () => {
+  const sceneKey = 'B'.repeat(22);
+  const fetched = { ...resource, id: sceneKey, name: 'Paint-2', revision: 12 };
+  let creates = 0;
+  const updates = [];
+  const studio = harness({
+    client: client({
+      get: async () => structuredClone(fetched),
+      create: async () => { creates += 1; return structuredClone(resource); },
+      update: async (id, input) => {
+        updates.push({ id, input: structuredClone(input) });
+        return { ...structuredClone(fetched), revision: 13 };
+      },
+    }),
+  });
+  attachSavedSceneUi(studio);
+  studio._handleSavedSceneUiError = (error) => { throw error; };
+
+  await studio.openSavedScene(sceneKey, { preserveLocalRecovery: true });
+  await studio._saveSavedSceneFromUi();
+
+  assert.equal(creates, 0);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].id, sceneKey);
+  assert.equal(updates[0].input.revision, 12);
+  assert.deepEqual(studio.getSavedSceneState(), {
+    id: sceneKey,
+    name: 'Paint-2',
+    revision: 13,
+    dirty: false,
+    busy: false,
+  });
+});
+
+test('built-in first Save retains Untitled/null new-scene semantics and creates exactly once', async () => {
+  let creates = 0;
+  let updates = 0;
+  const created = { ...resource, id: 'N'.repeat(22), name: 'Fresh Scene', revision: 1 };
+  const studio = harness({
+    client: client({
+      create: async (input) => {
+        creates += 1;
+        assert.equal(input.name, 'Fresh Scene');
+        return structuredClone(created);
+      },
+      update: async () => { updates += 1; return structuredClone(created); },
+    }),
+  });
+  const ui = attachSavedSceneUi(studio);
+  studio._showSavedSceneNameDialog = async () => 'Fresh Scene';
+  studio._handleSavedSceneUiError = (error) => { throw error; };
+  studio._syncSavedSceneUi();
+
+  assert.deepEqual(studio.getSavedSceneState(), {
+    id: null, name: '', revision: null, dirty: false, busy: false,
+  });
+  assert.equal(ui.savedSceneName.textContent, 'Untitled');
+
+  await studio._saveSavedSceneFromUi();
+
+  assert.equal(creates, 1);
+  assert.equal(updates, 0);
+  assert.equal(studio.currentSavedSceneId, created.id);
+  assert.equal(studio.savedSceneBusy, false);
+  assert.equal(ui.savedSceneName.textContent, 'Fresh Scene');
+  assert.equal(ui.savedSceneState.textContent, '');
 });

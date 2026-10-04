@@ -4253,8 +4253,7 @@ export class ArStudio {
 	}
 
 	_savedSceneUiOperation(operation) {
-		this._syncSavedSceneUi();
-		return Promise.resolve().then(operation).finally(() => this._syncSavedSceneUi());
+		return Promise.resolve().then(operation);
 	}
 
 	_toggleSavedSceneMenu() {
@@ -6180,10 +6179,12 @@ export class ArStudio {
 			});
 		}
 		this.savedSceneBusy = true;
+		this._syncSavedSceneUi?.();
 		try {
 			return await operation(signal);
 		} finally {
 			this.savedSceneBusy = false;
+			this._syncSavedSceneUi?.();
 		}
 	}
 
