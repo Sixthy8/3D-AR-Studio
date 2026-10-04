@@ -925,17 +925,13 @@ export function studioStyles() {
 .ars-forge-go[disabled] { opacity: 0.55; cursor: not-allowed; }
 
 /* ── Saved Scenes ── */
-.ars-saved-scene-bar {
-	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-	padding: 7px 12px; background: rgba(11, 12, 16, 0.78);
-	border-bottom: 1px solid var(--ars-line); color: var(--ars-ink);
-}
-.ars-saved-scene-current { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-right: auto; }
+.ars-saved-scene-control { position: relative; min-width: 0; max-width: min(34vw, 280px); }
 .ars-saved-scene-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ars-saved-scene-state { color: var(--ars-ink-faint); font-size: 11px; white-space: nowrap; }
 .ars-saved-scene-state[data-dirty="true"] { color: var(--ars-warn); }
-.ars-saved-scene-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ars-saved-scene-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 16; display: flex; flex-direction: column; gap: 3px; min-width: 150px; max-width: min(220px, calc(100vw - 24px)); max-height: min(70vh, 360px); overflow-y: auto; padding: 6px; background: rgba(11, 12, 16, 0.97); border: 1px solid var(--ars-line); border-radius: 12px; box-shadow: 0 12px 36px rgba(0, 0, 0, .35); }
 .ars-saved-scene-btn { padding: 7px 10px; font-size: 12px; }
+.ars-saved-scene-menu .ars-saved-scene-btn { width: 100%; text-align: left; min-height: 38px; }
 .ars-saved-scene-btn.ars-btn-danger { color: #fecaca; }
 .ars-saved-scene-dialog { width: min(560px, 100%); text-align: left; align-items: stretch; }
 .ars-saved-scene-panel-status { min-height: 20px; }
@@ -1183,10 +1179,9 @@ export function studioStyles() {
 	.ars-selbar { bottom: calc(env(safe-area-inset-bottom, 0px) + 100px); }
 }
 @media (max-width: 560px) {
-  .ars-saved-scene-bar { align-items: stretch; }
-  .ars-saved-scene-current { width: 100%; }
-  .ars-saved-scene-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
-  .ars-saved-scene-btn { flex: 0 0 auto; min-height: 38px; }
+  .ars-saved-scene-control { max-width: min(48vw, 220px); }
+  .ars-saved-scene-trigger { padding-inline: 9px; }
+  .ars-saved-scene-menu { left: auto; right: 0; min-width: 164px; }
 }
 
 `;

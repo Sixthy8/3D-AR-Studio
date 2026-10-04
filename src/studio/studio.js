@@ -359,13 +359,18 @@ export class ArStudio {
 			node.addEventListener(type, fn, opts);
 		};
 
-		bind(u.savedSceneNew, 'click', () => this._newSavedSceneFromUi());
-		bind(u.savedSceneOpen, 'click', () => this._openSavedScenesPanel());
-		bind(u.savedSceneSave, 'click', () => this._saveSavedSceneFromUi());
-		bind(u.savedSceneSaveAs, 'click', () => this._saveSavedSceneAsFromUi());
-		bind(u.savedSceneRename, 'click', () => this._renameSavedSceneFromUi());
-		bind(u.savedSceneDuplicate, 'click', () => this._duplicateSavedSceneFromUi());
-		bind(u.savedSceneDelete, 'click', () => this._deleteSavedSceneFromUi());
+		bind(u.savedSceneTrigger, 'click', () => this._toggleSavedSceneMenu());
+		const bindSavedSceneAction = (node, fn) => bind(node, 'click', () => { this._closeSavedSceneMenu(); fn(); });
+		bindSavedSceneAction(u.savedSceneNew, () => this._newSavedSceneFromUi());
+		bindSavedSceneAction(u.savedSceneOpen, () => this._openSavedScenesPanel());
+		bindSavedSceneAction(u.savedSceneSave, () => this._saveSavedSceneFromUi());
+		bindSavedSceneAction(u.savedSceneSaveAs, () => this._saveSavedSceneAsFromUi());
+		bindSavedSceneAction(u.savedSceneRename, () => this._renameSavedSceneFromUi());
+		bindSavedSceneAction(u.savedSceneDuplicate, () => this._duplicateSavedSceneFromUi());
+		bindSavedSceneAction(u.savedSceneDelete, () => this._deleteSavedSceneFromUi());
+		bind(u.root, 'pointerdown', (e) => {
+			if (!u.savedSceneMenu?.hidden && !u.savedSceneTrigger.contains(e.target)) this._closeSavedSceneMenu();
+		});
 		bind(u.savedScenePanelClose, 'click', () => this._closeSavedScenePanel());
 		bind(u.savedScenePanel, 'click', (e) => {
 			if (e.target === u.savedScenePanel) this._closeSavedScenePanel();
@@ -4121,6 +4126,7 @@ export class ArStudio {
 		}
 		if (e.key === 'Escape') {
 			if (this._savedSceneDialog) this._resolveSavedSceneDialog(null);
+			else if (!this.ui.savedSceneMenu.hidden) this._closeSavedSceneMenu();
 			else if (!this.ui.savedScenePanel.hidden) this._closeSavedScenePanel();
 			else if (!this.ui.tray.hidden) this._closeTray();
 			else if (!this.ui.roomModal.hidden) this._closeRoomModal();
@@ -4232,11 +4238,11 @@ export class ArStudio {
 
 	_syncSavedSceneUi() {
 		const u = this.ui;
-		if (!u?.savedSceneBar) return;
+		if (!u?.savedSceneTrigger) return;
 		const state = this.getSavedSceneState();
 		const hasIdentity = state.id != null;
-		u.savedSceneName.textContent = state.name || 'Untitled Scene';
-		u.savedSceneState.textContent = state.busy ? 'Working…' : (state.dirty ? 'Unsaved Changes' : (hasIdentity ? 'Saved' : 'Unsaved'));
+		u.savedSceneName.textContent = state.name || 'Untitled';
+		u.savedSceneState.textContent = state.busy ? '• Working…' : (state.dirty ? '• Unsaved' : '');
 		u.savedSceneState.dataset.dirty = String(state.dirty);
 		for (const button of [u.savedSceneNew, u.savedSceneOpen, u.savedSceneSave, u.savedSceneSaveAs, u.savedSceneRename, u.savedSceneDuplicate, u.savedSceneDelete]) {
 			if (button) button.disabled = state.busy || (button === u.savedSceneRename || button === u.savedSceneDuplicate || button === u.savedSceneDelete ? !hasIdentity : false);
@@ -4246,6 +4252,25 @@ export class ArStudio {
 	_savedSceneUiOperation(operation) {
 		this._syncSavedSceneUi();
 		return Promise.resolve().then(operation).finally(() => this._syncSavedSceneUi());
+	}
+
+	_toggleSavedSceneMenu() {
+		const u = this.ui;
+		if (!u.savedSceneMenu || u.savedSceneTrigger.hidden) return;
+		if (u.savedSceneMenu.hidden) {
+			u.savedSceneMenu.hidden = false;
+			u.savedSceneTrigger.setAttribute('aria-expanded', 'true');
+			u.savedSceneNew.focus();
+		} else this._closeSavedSceneMenu();
+	}
+
+	_closeSavedSceneMenu() {
+		const u = this.ui;
+		if (!u.savedSceneMenu || u.savedSceneMenu.hidden) return;
+		const hadFocus = u.savedSceneMenu.contains(document.activeElement);
+		u.savedSceneMenu.hidden = true;
+		u.savedSceneTrigger.setAttribute('aria-expanded', 'false');
+		if (hadFocus) u.savedSceneTrigger.focus();
 	}
 
 	_savedSceneErrorMessage(error) {

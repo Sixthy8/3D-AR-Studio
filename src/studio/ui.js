@@ -184,16 +184,19 @@ export function buildUI(host, cfg) {
 		el('span', { 'aria-hidden': 'true', text: '📷' }), 'Camera',
 	]);
 
+	const savedSceneEnabled = !experienceMode;
+	const savedSceneName = el('span', { class: 'ars-saved-scene-name', text: 'Untitled' });
+	const savedSceneState = el('span', { class: 'ars-saved-scene-state', role: 'status', 'aria-live': 'polite' });
+	const savedSceneTrigger = el('button', { type: 'button', class: 'ars-icon-btn ars-saved-scene-trigger', hidden: !savedSceneEnabled, 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': 'Saved Scene menu' }, [savedSceneName, savedSceneState, el('span', { 'aria-hidden': 'true', text: '▾' })]);
+	const savedSceneControl = el('div', { class: 'ars-saved-scene-control' });
+
 	const top = el('div', { class: 'ars-top' }, [
-		back, title, count, sceneBtn, exportBtn,
+		back, title, count, sceneBtn, savedSceneControl, exportBtn,
 		el('span', { class: 'ars-spacer' }),
 		roomBtn, qrBtn, xrBtn, cameraBtn,
 	]);
 
-	// ── Saved Scene controls (editor only) ────────────────────────────────────
-	const savedSceneEnabled = !experienceMode;
-	const savedSceneName = el('span', { class: 'ars-saved-scene-name', text: 'Untitled Scene' });
-	const savedSceneState = el('span', { class: 'ars-saved-scene-state', role: 'status', 'aria-live': 'polite', text: 'Unsaved' });
+	// ── Saved Scene menu actions (editor only) ────────────────────────────────
 	const savedSceneNew = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn', text: 'New', disabled: !savedSceneEnabled });
 	const savedSceneOpen = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn', text: 'Open', disabled: !savedSceneEnabled });
 	const savedSceneSave = el('button', { type: 'button', class: 'ars-btn ars-btn-primary ars-saved-scene-btn', text: 'Save', disabled: !savedSceneEnabled });
@@ -201,10 +204,9 @@ export function buildUI(host, cfg) {
 	const savedSceneRename = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn', text: 'Rename', disabled: !savedSceneEnabled });
 	const savedSceneDuplicate = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn', text: 'Duplicate', disabled: !savedSceneEnabled });
 	const savedSceneDelete = el('button', { type: 'button', class: 'ars-btn ars-saved-scene-btn ars-btn-danger', text: 'Delete', disabled: !savedSceneEnabled });
-	const savedSceneBar = el('div', { class: 'ars-saved-scene-bar', hidden: !savedSceneEnabled, 'aria-label': 'Saved Scene controls' }, [
-		el('div', { class: 'ars-saved-scene-current' }, [savedSceneName, savedSceneState]),
-		el('div', { class: 'ars-saved-scene-actions', role: 'toolbar', 'aria-label': 'Saved Scene actions' }, [savedSceneNew, savedSceneOpen, savedSceneSave, savedSceneSaveAs, savedSceneRename, savedSceneDuplicate, savedSceneDelete]),
-	]);
+	const savedSceneMenu = el('div', { class: 'ars-saved-scene-menu', hidden: true, role: 'menu', 'aria-label': 'Saved Scene actions' }, [savedSceneNew, savedSceneOpen, savedSceneSave, savedSceneSaveAs, savedSceneRename, savedSceneDuplicate, savedSceneDelete]);
+	savedSceneControl.append(savedSceneTrigger, savedSceneMenu);
+	for (const action of savedSceneMenu.children) action.setAttribute('role', 'menuitem');
 
 	const savedScenePanelClose = el('button', { type: 'button', class: 'ars-btn', text: 'Close' });
 	const savedScenePanelStatus = el('p', { class: 'ars-saved-scene-panel-status', role: 'status', 'aria-live': 'polite' });
@@ -810,7 +812,7 @@ export function buildUI(host, cfg) {
 
 	const hud = el('div', { class: 'ars-hud' }, [
 		runtimeChrome,
-		top, savedSceneBar, empty, status, chip, selbar, scenePanel, dock, tray,
+		top, empty, status, chip, selbar, scenePanel, dock, tray,
 		qrModal, exportModal, arModal, roomModal, savedScenePanel, savedSceneNameModal, savedSceneDecisionModal, savedSceneConfirmModal,
 	]);
 	const root = el('div', { class: 'ars-root' }, [video, canvas, hud]);
@@ -827,7 +829,7 @@ export function buildUI(host, cfg) {
 	}
 
 	return {
-		root, video, canvas, hud, top, title, count, status, chip, savedSceneBar, savedSceneName, savedSceneState,
+		root, video, canvas, hud, top, title, count, status, chip, savedSceneTrigger, savedSceneMenu, savedSceneName, savedSceneState,
 		savedSceneNew, savedSceneOpen, savedSceneSave, savedSceneSaveAs, savedSceneRename, savedSceneDuplicate, savedSceneDelete,
 		savedScenePanel, savedScenePanelStatus, savedScenePanelList, savedScenePanelClose,
 		savedSceneNameModal, savedSceneNameInput, savedSceneNameError, savedSceneNameCancel, savedSceneNameSubmit,
