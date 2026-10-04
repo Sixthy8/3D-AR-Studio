@@ -43,6 +43,7 @@ test('popover interaction has one scoped outside listener and Escape close path'
   assert.match(source, /savedSceneTrigger.*_toggleSavedSceneMenu/);
   assert.match(source, /savedSceneMenu.*hidden.*_closeSavedSceneMenu/);
   assert.match(source, /u\.root, 'pointerdown'/);
+  assert.match(source, /!u\.savedSceneTrigger\.contains\(e\.target\).*!u\.savedSceneMenu\.contains\(e\.target\)/);
   assert.match(source, /aria-expanded.*true/);
   assert.match(source, /savedSceneNew\.focus/);
   assert.match(source, /savedSceneTrigger\.focus/);

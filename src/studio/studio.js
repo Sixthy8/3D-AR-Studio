@@ -369,7 +369,7 @@ export class ArStudio {
 		bindSavedSceneAction(u.savedSceneDuplicate, () => this._duplicateSavedSceneFromUi());
 		bindSavedSceneAction(u.savedSceneDelete, () => this._deleteSavedSceneFromUi());
 		bind(u.root, 'pointerdown', (e) => {
-			if (!u.savedSceneMenu?.hidden && !u.savedSceneTrigger.contains(e.target)) this._closeSavedSceneMenu();
+			if (!u.savedSceneMenu?.hidden && !u.savedSceneTrigger.contains(e.target) && !u.savedSceneMenu.contains(e.target)) this._closeSavedSceneMenu();
 		});
 		bind(u.savedScenePanelClose, 'click', () => this._closeSavedScenePanel());
 		bind(u.savedScenePanel, 'click', (e) => {
