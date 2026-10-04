@@ -101,6 +101,7 @@ export class ArStudio {
 		this.sources = resolveSources(this.config.assets, this.config);
 		this._listeners = new Map();
 		this._destroyed = false;
+		this._localRecoveryWriteSuppressed = !!this.config.skipLocalRecovery;
 
 		this.ui = buildUI(host, this.config);
 		if (this.config.fullscreen ?? (host === document.body)) this.ui.root.classList.add('is-fullscreen');
@@ -115,7 +116,7 @@ export class ArStudio {
 		this._initScene();
 		this._initState();
 		this._wireUI();
-		this._boot();
+		this._bootPromise = this._boot();
 	}
 
 	// ── Events ────────────────────────────────────────────────────────────────
@@ -647,7 +648,7 @@ export class ArStudio {
 		if (!coarse && this.ui.qrBtn) this.ui.qrBtn.hidden = false;
 
 		const bootRoom = normalizeRoomCode(this.config.urlRoom || '');
-		this._restoreScene({ skipLocal: !!bootRoom }).then(async () => {
+		return this._restoreScene({ skipLocal: !!bootRoom || !!this.config.skipLocalRecovery }).then(async () => {
 			if (bootRoom) this._joinRoom(bootRoom);
 			if (this.config.urlPrompt && this.config.urlPrompt.length >= 3 && this.ui.forgeInput) {
 				this.ui.forgeInput.value = this.config.urlPrompt;
@@ -662,6 +663,8 @@ export class ArStudio {
 			) {
 				trackExperienceEvent(this.config, 'open');
 			}
+		}).finally(() => {
+			this._localRecoveryWriteSuppressed = false;
 		});
 	}
 
@@ -1223,7 +1226,7 @@ export class ArStudio {
 			return;
 		}
 
-		if (this.config.persist !== false) {
+		if (this.config.persist !== false && !this._localRecoveryWriteSuppressed) {
 			try {
 				localStorage.setItem(this.config.persistKey, localDocumentJson);
 			} catch {
@@ -6102,6 +6105,11 @@ export class ArStudio {
 
 	// ── Public API ────────────────────────────────────────────────────────────
 
+	/** Resolve after startup restoration and experience activation complete. */
+	whenReady() {
+		return this._bootPromise;
+	}
+
 	/** Install the identity returned by a future Saved Scene persistence call. */
 	adoptSavedSceneIdentity({ id = null, name = '', revision = null } = {}) {
 		this.currentSavedSceneId = id == null ? null : String(id);
@@ -6263,7 +6271,7 @@ export class ArStudio {
 	}
 
 	/** Open a Saved Scene atomically, adopting identity only after restoration succeeds. */
-	openSavedScene(id, { signal } = {}) {
+	openSavedScene(id, { signal, preserveLocalRecovery = false } = {}) {
 		return this._runSavedSceneOperation(async () => {
 			const previousDocument = this.getSceneDocument();
 			const previousState = {
@@ -6274,6 +6282,8 @@ export class ArStudio {
 				dirty: this.dirty,
 			};
 			const resource = await this._savedScenes.get(id, { signal });
+			const previousRecoverySuppression = this._localRecoveryWriteSuppressed;
+			if (preserveLocalRecovery) this._localRecoveryWriteSuppressed = true;
 			try {
 				const restored = await this.setSceneDocument(resource.scene);
 				if (JSON.stringify(restored) !== JSON.stringify(resource.scene)) {
@@ -6289,6 +6299,8 @@ export class ArStudio {
 				this.savedSceneBaseline = previousState.baseline;
 				this.dirty = previousState.dirty;
 				throw error;
+			} finally {
+				this._localRecoveryWriteSuppressed = previousRecoverySuppression;
 			}
 		}, { signal });
 	}

@@ -97,6 +97,8 @@ export const DEFAULTS = {
 	maxPlacements: 20,
 	/** Restore the last scene on load. */
 	persist: true,
+	/** Start from a clean document without reading or replacing local recovery. */
+	skipLocalRecovery: false,
 	/** Analytics/telemetry hook: called with (event, detail) for every notable action. */
 	onEvent: null,
 };

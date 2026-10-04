@@ -144,6 +144,7 @@ export interface StudioOptions {
 	arLaunchUrl?: string;
 	persistKey?: string;
 	persist?: boolean;
+	skipLocalRecovery?: boolean;
 	maxPlacements?: number;
 	/** Render as a fixed full-screen layer. Defaults to true only on `document.body`. */
 	fullscreen?: boolean;
@@ -196,7 +197,8 @@ export declare class ArStudio {
 	listSavedScenes(options?: { limit?: number; offset?: number; signal?: AbortSignal }): Promise<SavedSceneMetadata[]>;
 	saveSavedScene(options?: { name?: string; signal?: AbortSignal }): Promise<SavedScene>;
 	saveSavedSceneAs(options: { name: string; signal?: AbortSignal }): Promise<SavedScene>;
-	openSavedScene(id: string, options?: { signal?: AbortSignal }): Promise<SavedScene>;
+	whenReady(): Promise<void>;
+	openSavedScene(id: string, options?: { signal?: AbortSignal; preserveLocalRecovery?: boolean }): Promise<SavedScene>;
 	renameSavedScene(name: string, options?: { signal?: AbortSignal }): Promise<SavedScene>;
 	duplicateSavedScene(options: { name: string; adopt?: boolean; signal?: AbortSignal }): Promise<SavedScene>;
 	deleteSavedScene(id?: string, options?: { revision?: number; signal?: AbortSignal }): Promise<boolean>;
